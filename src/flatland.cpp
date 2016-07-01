@@ -27,6 +27,56 @@ namespace {
       printf("\n");
     }
   }
+
+  GLuint compileShader(const char* vertexShaderSrc, const char* fragmenShaderSrc)
+  {
+    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertexShaderSrc, NULL);
+    glCompileShader(vertexShader);
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
+        printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentShaderSrc, NULL);
+    glCompileShader(fragmentShader);
+
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
+        printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, fragmentShader);
+    glAttachShader(shaderProgram, vertexShader);
+    glLinkProgram(shaderProgram);
+
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+      if (!success) {
+        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+        printf("ERROR::SHADER::PROGRAM::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    glOKORDIE;
+    return shaderProgram;
+  }
 };
 
 int main(int, const char*[]) {
@@ -115,57 +165,8 @@ int main(int, const char*[]) {
   }
 
   // compile shaders
-  GLuint shaderProgram;
-  {
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSrc, NULL);
-    glCompileShader(vertexShader);
-
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-      if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSrc, NULL);
-    glCompileShader(fragmentShader);
-
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-      if (!success) {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, fragmentShader);
-    glAttachShader(shaderProgram, vertexShader);
-    glLinkProgram(shaderProgram);
-
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-      if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        printf("ERROR::SHADER::PROGRAM::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    glUseProgram(shaderProgram);
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-  }
-  glOKORDIE;
+  GLuint shaderProgram = compileShader(vertexShaderSrc, fragmentShaderSrc);
+  glUseProgram(shaderProgram);
 
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, wallTexture);
