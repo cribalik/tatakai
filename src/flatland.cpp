@@ -14,6 +14,8 @@
 typedef unsigned char byte;
 #define glOKORDIE {GLenum __flatland_gl_error = glGetError(); if (__flatland_gl_error != GL_NO_ERROR) {printf("GL error at %s:%u: %u\n", __FILE__, __LINE__, __flatland_gl_error);}}
 #define PI 3.141592651f
+#define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
+typedef unsigned int uint;
 
 namespace {
   void print(glm::mat4 in) {
@@ -72,7 +74,7 @@ int main(int, const char*[]) {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (3 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (6 * sizeof(GLfloat)));
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (6 * sizeof(GLfloat)));
     glEnableVertexAttribArray(2);
   }
   glOKORDIE;
@@ -175,7 +177,7 @@ int main(int, const char*[]) {
 
   glm::mat4 transform;
   transform = glm::rotate(transform, 90.0f*2*PI/360, glm::vec3(0.0, 0.0, 1.0));
-  transform = glm::scale(transform, glm::vec3(0.2, 0.2, 0.2));
+  //transform = glm::scale(transform, glm::vec3(1.0, 1.0, 1.0));
   glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "uTransform"), 1, GL_FALSE, glm::value_ptr(transform));
   glOKORDIE;
 
@@ -185,7 +187,7 @@ int main(int, const char*[]) {
     glClear(GL_COLOR_BUFFER_BIT);
 
     transform = glm::rotate(glm::mat4(), SDL_GetTicks()/360.f, glm::vec3(0.0, 0.0, 1.0));
-    transform = glm::scale(transform, glm::vec3(0.2, 0.2, 0.2));
+    //transform = glm::scale(transform, glm::vec3(1.0, 1.0, 1.0));
     glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "uTransform"), 1, GL_FALSE, glm::value_ptr(transform));
 
     glBindVertexArray(square_VAO);
