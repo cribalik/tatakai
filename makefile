@@ -5,5 +5,6 @@ all: src/*
 	@g++ $(CFLAGS) $(IFLAGS) src/flatland.cpp $(LFLAGS)
 
 tags: src/*
+	@rm tags
 	@g++ -H $(CFLAGS) $(IFLAGS) src/flatland.cpp $(LFLAGS) 2>&1 | grep '^\.' | awk '{print $$2}' | xargs ctags -a -R
 .PHONY: tags

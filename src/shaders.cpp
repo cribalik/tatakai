@@ -1,19 +1,17 @@
 const char* vertexShaderSrc = R"(
   #version 330 core
 
-  layout (location = 0) in vec3 position;
-  layout (location = 1) in vec3 color;
+  layout (location = 0) in vec2 position;
   layout (location = 2) in vec2 texCoord;
 
-  out vec3 fColor;
   out vec2 fTexCoord;
 
-	uniform mat4 uTransform;
+  uniform vec4 uModel;
+  uniform vec2 uView;
 
   void main()
   {
-    gl_Position = uTransform * vec4(position, 1.0);
-    fColor = color;
+    gl_Position = vec4(position*uModel.zw + uModel.xy + uView, 0.0, 1.0);
     fTexCoord = texCoord;
   }
 )";
@@ -21,16 +19,14 @@ const char* vertexShaderSrc = R"(
 const char* fragmentShaderSrc = R"(
   #version 330 core
 
-  in vec3 fColor;
   in vec2 fTexCoord;
 
   uniform sampler2D uTexture;
-  uniform sampler2D uTexture2;
 
   out vec4 color;
 
   void main()
   {
-    color = mix(texture(uTexture, fTexCoord), texture(uTexture2, vec2(fTexCoord.x, 1.0-fTexCoord.y)), 0.2);
+    color = texture(uTexture, fTexCoord);
   }
 )";
