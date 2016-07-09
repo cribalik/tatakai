@@ -1,24 +1,35 @@
-#if 1
 #include <GL/glew.h>
-#endif
 #include <GL/gl.h>
 #include <SOIL/SOIL.h>
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include "shaders.cpp"
-#include <iostream>
 
 typedef unsigned char byte;
+#if RELEASE
+#define glOKORDIE 
+#else
 #define glOKORDIE {GLenum __flatland_gl_error = glGetError(); if (__flatland_gl_error != GL_NO_ERROR) {printf("GL error at %s:%u: %u\n", __FILE__, __LINE__, __flatland_gl_error);}}
+#endif
 #define PI 3.141592651f
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
 typedef unsigned int uint;
 
 
 namespace {
+  // floating point rand functions
+  inline float frand(float upper) {
+    return float(rand())/float(RAND_MAX)*upper;
+  }
+  inline float frand(float lower, float upper) {
+    return float(rand())/float(RAND_MAX)*(upper-lower) + lower;
+  }
+  inline float frand() {
+    return float(rand())/float(RAND_MAX);
+  }
+
   void print(glm::mat4 in)
   {
     const float* mat = glm::value_ptr(in);
@@ -93,7 +104,7 @@ namespace {
     res = SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_assert(!res);
 
-    SDL_Window* window = SDL_CreateWindow("My window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 800, SDL_WINDOW_OPENGL);
+    SDL_Window* window = SDL_CreateWindow("My window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL);
     SDL_assert(window);
 
     SDL_GL_CreateContext(window);
@@ -115,8 +126,8 @@ namespace {
     glOKORDIE;
 
     int w,h;
-    byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGB);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
+    byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGBA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
     SOIL_free_image_data(image);
     glOKORDIE;
 
@@ -146,32 +157,70 @@ namespace {
   bool isDown[KEY_MAX] = {};
 
   glm::vec2 viewPosition;
-  glm::vec4 modelPosition(0,0,0.1,0.1);
   glm::vec2 playerPosition[4] = {};
 
+  const int SPRITES_MAX = 1;
+
+#pragma pack(push,1)
+  struct Sprite {
+    GLfloat x, y, w, h, tx, ty, tw, th;
+  };
+#pragma pack(pop)
+
+  Sprite sprites[SPRITES_MAX];
 };
 
 int main(int, const char*[]) {
   SDL_Window* window = initSubSystems();
 
+#if 0
+  for (int i = 0; i < SPRITES_MAX; ++i) {
+    sprites[i] = {
+      frand(-1,1), frand(-1,1),
+      0.02, 0.02,
+      0,0,
+      1,1,
+    };
+  }
+#endif
+  sprites[0] = {0,0, 1.0, 1.0, 0,0, 0.5,0.5};
+
   // create a square
   GLuint sprites_VAO;
   {
-    const GLfloat sprites[] = {
-        //pos          tex
-      200, 200,     0, 0, 1, 1,
+    const GLfloat rectangleVertices[] = {
+     -1, -1,
+     -1,  1,
+      1, -1,
+      1,  1,
     };
+
+    GLuint rectangle_VBO;
+    glGenBuffers(1, &rectangle_VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, rectangle_VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(rectangleVertices), rectangleVertices, GL_STATIC_DRAW);
+    glOKORDIE;
+
     GLuint sprites_VBO;
     glGenVertexArrays(1, &sprites_VAO);
     glBindVertexArray(sprites_VAO);
     glGenBuffers(1, &sprites_VBO);
     glBindBuffer(GL_ARRAY_BUFFER, sprites_VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(sprites), sprites, GL_DYNAMIC_DRAW);
     glOKORDIE;
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*) 0);
+
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (GLvoid*) (3 * sizeof(GLfloat)));
+    glVertexAttribDivisor(0, 1);
+
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
+    glVertexAttribDivisor(1, 1);
+
+    glBindBuffer(GL_ARRAY_BUFFER, rectangle_VBO);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (GLvoid*) 0);
+    glEnableVertexAttribArray(2);
+    glOKORDIE;
   }
   glOKORDIE;
 
@@ -181,27 +230,25 @@ int main(int, const char*[]) {
   glOKORDIE;
 
   // create a texture
-  // GLuint wallTexture = loadTexture("assets/wall.jpg");
   GLuint smileyTexture = loadTexture("assets/awesomeface.png");
-  GLuint wallTexture = loadTexture("assets/wall.jpg");
+  // GLuint wallTexture = loadTexture("assets/wall.jpg");
   glOKORDIE;
 
   // bind textures
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, wallTexture);
+  glBindTexture(GL_TEXTURE_2D, smileyTexture);
   glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
   glOKORDIE;
 
   // get locations
-  GLint modelLocation = glGetUniformLocation(shaderProgram, "uModel");
   GLint viewLocation = glGetUniformLocation(shaderProgram, "uView");
   glOKORDIE;
 
-  glViewport(0, 0, 1000, 1000);
+  glViewport(0, 0, 800, 600);
 
   while (true)
   {
-    glClearColor(1,1,0,1);
+    glClearColor(1,0,0,1);
     glClear(GL_COLOR_BUFFER_BIT);
 
     // parse events
@@ -239,21 +286,19 @@ int main(int, const char*[]) {
 
     const float SPEED = 0.01;
     if (isDown[KEY_RIGHT]) {
-      playerPosition[0].x += SPEED;
+      viewPosition.x += SPEED;
       printf("Moving right\n");
     }
     if (isDown[KEY_LEFT]) {
-      playerPosition[0].x -= SPEED;
+      viewPosition.x -= SPEED;
       printf("Moving left\n");
     }
 
-    glBindTexture(GL_TEXTURE_2D, wallTexture);
-    glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
-    glOKORDIE;
-    glUniform4fv(modelLocation, 1, glm::value_ptr(glm::vec4(playerPosition[0], 1,1)));
     glUniform2f(viewLocation, viewPosition.x, viewPosition.y);
+    glOKORDIE;
     glBindVertexArray(sprites_VAO);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, SPRITES_MAX);
+    glOKORDIE;
 
     SDL_GL_SwapWindow(window);
   }
