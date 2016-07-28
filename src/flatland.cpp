@@ -5,7 +5,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <SDL2/SDL.h>
 #include <stdio.h>
-#include "shaders.cpp"
 
 typedef unsigned char byte;
 #if RELEASE
@@ -13,12 +12,31 @@ typedef unsigned char byte;
 #else
 #define glOKORDIE {GLenum __flatland_gl_error = glGetError(); if (__flatland_gl_error != GL_NO_ERROR) {printf("GL error at %s:%u: %u\n", __FILE__, __LINE__, __flatland_gl_error);}}
 #endif
-#define PI 3.141592651f
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
 typedef unsigned int uint;
+#define local_persist static
 
 
 namespace {
+
+# include "shaders.cpp"
+
+  typedef Uint64 Timer;
+  inline Timer startTimer() {
+    return SDL_GetPerformanceCounter();
+  }
+
+  inline float getDuration(Timer t) {
+    return float(SDL_GetPerformanceCounter() - t)/SDL_GetPerformanceFrequency();
+  }
+
+  inline float time2fps(float seconds) {
+    return 1/seconds;
+  }
+
+  int screenW = 800;
+  int screenH = 600;
+
   // floating point rand functions
   inline float frand(float upper) {
     return float(rand())/float(RAND_MAX)*upper;
@@ -104,7 +122,7 @@ namespace {
     res = SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_assert(!res);
 
-    SDL_Window* window = SDL_CreateWindow("My window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL);
+    SDL_Window* window = SDL_CreateWindow("My window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenW, screenH, SDL_WINDOW_OPENGL);
     SDL_assert(window);
 
     SDL_GL_CreateContext(window);
@@ -157,50 +175,42 @@ namespace {
   bool isDown[KEY_MAX] = {};
 
   glm::vec2 viewPosition;
-  glm::vec2 playerPosition[4] = {};
 
-  const int SPRITES_MAX = 1;
+  const int LIGHTS_MAX = 1024;
+  int numLights = 64;
+  glm::vec2 lightPositions[LIGHTS_MAX];
+  glm::vec3 lightColors[LIGHTS_MAX];
 
-#pragma pack(push,1)
+  const int SPRITES_MAX = 1024;
+  int numSprites = 1;
+
   struct Sprite {
     GLfloat x, y, w, h, tx, ty, tw, th;
   };
-#pragma pack(pop)
 
   Sprite sprites[SPRITES_MAX];
+
+  // some colors
+  glm::vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 };
 
 int main(int, const char*[]) {
   SDL_Window* window = initSubSystems();
 
-#if 0
-  for (int i = 0; i < SPRITES_MAX; ++i) {
+  SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
+  for (int i = 0; i < numSprites; ++i) {
     sprites[i] = {
       frand(-1,1), frand(-1,1),
-      0.02, 0.02,
+      0.2, 0.2,
       0,0,
       1,1,
     };
   }
-#endif
-  sprites[0] = {0,0, 1.0, 1.0, 0,0, 0.5,0.5};
+  // sprites[0] = {0, 0, 1, 1, 0, 0, 6, 6};
 
   // create a square
   GLuint sprites_VAO;
   {
-    const GLfloat rectangleVertices[] = {
-     -1, -1,
-     -1,  1,
-      1, -1,
-      1,  1,
-    };
-
-    GLuint rectangle_VBO;
-    glGenBuffers(1, &rectangle_VBO);
-    glBindBuffer(GL_ARRAY_BUFFER, rectangle_VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(rectangleVertices), rectangleVertices, GL_STATIC_DRAW);
-    glOKORDIE;
-
     GLuint sprites_VBO;
     glGenVertexArrays(1, &sprites_VAO);
     glBindVertexArray(sprites_VAO);
@@ -217,37 +227,52 @@ int main(int, const char*[]) {
     glEnableVertexAttribArray(1);
     glVertexAttribDivisor(1, 1);
 
-    glBindBuffer(GL_ARRAY_BUFFER, rectangle_VBO);
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GLfloat), (GLvoid*) 0);
-    glEnableVertexAttribArray(2);
     glOKORDIE;
   }
-  glOKORDIE;
+  
+  // initialize lights
+  {
+    for (int i = 0; i < numLights; ++i) {
+      lightColors[i] = FIRE;
+    }
+  }
 
-  // compile shaders
-  GLuint shaderProgram = compileShader(vertexShaderSrc, fragmentShaderSrc);
-  glUseProgram(shaderProgram);
-  glOKORDIE;
+  // compile shaders and set static uniforms
+  GLuint spriteShader;
+  GLint viewLocation;
+  GLint lightPositionLocation;
+  GLint lightColorLocation;
+  GLint numLightsLocation;
+  {
+    spriteShader = compileShader(vertexShaderSrc, fragmentShaderSrc);
+    glUseProgram(spriteShader);
+    glOKORDIE;
+    // bind the spritesheet
+    GLuint wallTexture = loadTexture("assets/wall.jpg");
+    glOKORDIE;
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, wallTexture);
+    glUniform1i(glGetUniformLocation(spriteShader, "uTexture"), 0);
+    glOKORDIE;
+    // set lights
+    SDL_SetRelativeMouseMode(SDL_TRUE);
+    SDL_GetRelativeMouseState(NULL, NULL);
+    // get locations
+    viewLocation = glGetUniformLocation(spriteShader, "uView");
+    // lightPositionLocation = glGetUniformLocation(spriteShader, "uLightPos");
+    // lightColorLocation = glGetUniformLocation(spriteShader, "uLightColor");
+    // numLightsLocation = glGetUniformLocation(spriteShader, "uNumLights");
+    GLuint ambientLightLocation = glGetUniformLocation(spriteShader, "uAmbientLight");
+    glUniform3f(ambientLightLocation, 0.3, 0.3, 0.3);
+    glOKORDIE;
+  }
 
-  // create a texture
-  GLuint smileyTexture = loadTexture("assets/awesomeface.png");
-  // GLuint wallTexture = loadTexture("assets/wall.jpg");
-  glOKORDIE;
-
-  // bind textures
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, smileyTexture);
-  glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
-  glOKORDIE;
-
-  // get locations
-  GLint viewLocation = glGetUniformLocation(shaderProgram, "uView");
-  glOKORDIE;
-
-  glViewport(0, 0, 800, 600);
+  glViewport(0, 0, screenW, screenH);
 
   while (true)
   {
+    Timer loopTime = startTimer();
+
     glClearColor(1,0,0,1);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -283,6 +308,8 @@ int main(int, const char*[]) {
         default: break;
       }
     }
+    int mouseDX, mouseDY;
+    SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
 
     const float SPEED = 0.01;
     if (isDown[KEY_RIGHT]) {
@@ -294,12 +321,34 @@ int main(int, const char*[]) {
       printf("Moving left\n");
     }
 
+    glUseProgram(spriteShader);
+    if (mouseDX != 0 || mouseDY != 0) {
+      for (int i = 0; i < numLights; ++i) {
+        lightPositions[i] += glm::vec2((float) mouseDX/screenW, (float) -mouseDY/screenH);
+        lightPositions[i] = glm::clamp(lightPositions[i], glm::vec2(-1,-1), glm::vec2(1,1));
+      }
+    } else {
+      local_persist glm::vec2 directions[LIGHTS_MAX];
+      for (int i = 0; i < numLights; ++i) {
+        float SPEED = 0.01f;
+        if (!(rand()%20)) {
+          float alpha = frand(0, 2*glm::pi<float>());
+          directions[i] = SPEED * glm::vec2(glm::cos(alpha), glm::sin(alpha));
+        }
+        lightPositions[i] += directions[i];
+        lightPositions[i] = glm::clamp(lightPositions[i], glm::vec2(-1,-1), glm::vec2(1,1));
+      }
+    }
+    // glUniform2fv(lightPositionLocation, numLights, (GLfloat*) &lightPositions[0]);
+    // glUniform3fv(lightColorLocation, numLights, (GLfloat*) lightColors);
+
     glUniform2f(viewLocation, viewPosition.x, viewPosition.y);
-    glOKORDIE;
     glBindVertexArray(sprites_VAO);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, SPRITES_MAX);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, numSprites);
     glOKORDIE;
 
     SDL_GL_SwapWindow(window);
+
+    printf("%f fps\n", time2fps(getDuration(loopTime)));
   }
 }
