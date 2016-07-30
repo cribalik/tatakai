@@ -5,16 +5,75 @@ const char* sprite_vertex_shader_src = R"(
   layout (location = 0) in vec4 pos;
   layout (location = 1) in vec4 texCoord;
 
-  out vec4 vTexCoord;
-  out vec4 vPos;
+  out VERTEX_DATA {
+    vec4 texCoord;
+  } myOutput;
 
   uniform vec2 uView;
 
   void main()
   {
-    gl_Position = vec4(fPos + uView, 0, 1);
-    vTexCoord = texCoord;
-    vPos = pos;
+    gl_Position = pos + vec4(uView, 0, 0);
+    myOutput.texCoord = texCoord;
+  }
+
+)";
+
+const char* sprite_geometry_shader_src = R"(
+  #version 330 core
+
+  layout (points) in;
+  layout (triangle_strip, max_vertices = 4) out;
+
+  in VERTEX_DATA {
+    vec4 texCoord;
+  } myInput[];
+
+  out vec2 texCoord;
+
+  void main() {
+    // we swap texture y coordinates here
+    vec2 texOrig = vec2(myInput[0].texCoord.x, myInput[0].texCoord.y + myInput[0].texCoord.w);
+    vec2 texSize = vec2(myInput[0].texCoord.z, -myInput[0].texCoord.w);
+
+    vec2 orig = gl_in[0].gl_Position.xy - gl_in[0].gl_Position.zw/2;
+    vec2 size = gl_in[0].gl_Position.zw;
+
+    gl_Position = vec4(orig, 0, 1);
+    texCoord = texOrig;
+    EmitVertex();
+    gl_Position = vec4(orig + vec2(0, size.y), 0, 1);
+    texCoord = texOrig + vec2(0, texSize.y);
+    EmitVertex();
+    gl_Position = vec4(orig + vec2(size.x, 0), 0, 1);
+    texCoord = texOrig + vec2(texSize.x, 0);
+    EmitVertex();
+    gl_Position = vec4(orig + size, 0, 1);
+    texCoord = texOrig + texSize;
+    EmitVertex();
+    EndPrimitive();
+  }
+)";
+
+const char* sprite_fragment_shader_src = R"(
+
+  #version 330 core
+
+  in vec2 texCoord;
+
+  uniform sampler2D uTexture;
+  uniform vec3 uAmbientLight;
+
+  out vec4 color;
+
+  void main()
+  {
+    vec4 texColor = texture(uTexture, vec2(texCoord.x/1024, texCoord.y/1024));
+    if (texColor.a == 0) {
+      discard;
+    } else {
+      color = vec4(uAmbientLight, 1) * texColor;
+    }
   }
 
 )";
@@ -25,6 +84,10 @@ const char* particle_vertex_shader_src = R"(
 
   layout (location = 0) in vec3 model; // pos and size
   layout (location = 1) in vec3 texCoord; // pos and size
+
+  out VS_OUT {
+    vec4 texCoord;
+  } myInput;
 
   out vec3 vTexCoord;
 
@@ -39,41 +102,6 @@ const char* particle_vertex_shader_src = R"(
 
 )";
 
-const char* sprite_geometry_shader_src = R"(
-  #version 330 core
-
-  layout (points) in;
-  layout (triangle_strip, max_vertices = 4) out;
-
-  void main() {  }
-)";
-
-
-const char* sprite_fragment_shader_src = R"(
-
-  #version 330 core
-
-  in vec2 fTexCoord;
-  in vec2 fPos;
-
-  uniform sampler2D uTexture;
-  uniform vec3 uAmbientLight;
-
-  out vec4 color;
-
-  void main()
-  {
-
-    vec4 texColor = texture(uTexture, 1-fTexCoord);
-    // color = (diffuse + vec4(uAmbientLight,1)) * texColor;
-    color = vec4(uAmbientLight, 1) * texColor;
-  }
-
-)";
-
-const char* point_light_geometry_shader_src = R"(
-  #version 330 core
-)";
 
 const char* point_light_fragment_shader_src = R"(
   #version 330 core
