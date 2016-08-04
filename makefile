@@ -1,5 +1,5 @@
 LFLAGS = -lGLEW -lSDL2 -lGL -lSOIL
-CFLAGS = -std=c++11 -Wall
+CFLAGS = -std=c++11 -Wall -g
 
 all: src/*
 	@g++ $(CFLAGS) $(IFLAGS) src/flatland.cpp $(LFLAGS)

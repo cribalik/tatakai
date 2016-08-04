@@ -25,7 +25,7 @@ namespace {
 
 # include "shaders.cpp"
 
-  // init
+  // Init
   int screen_w = 800;
   int screen_h = 600;
   SDL_Window* initSubSystems()
@@ -57,7 +57,7 @@ namespace {
     return window;
   }
 
-  // time
+  // Time
   typedef Uint64 Timer;
   inline Timer startTimer() {
     return SDL_GetPerformanceCounter();
@@ -66,7 +66,7 @@ namespace {
     return float(SDL_GetPerformanceCounter() - t)/SDL_GetPerformanceFrequency();
   }
 
-  // math
+  // Math
   inline float frand(float upper) {
     return float(rand())/float(RAND_MAX)*upper;
   }
@@ -76,6 +76,9 @@ namespace {
   inline float frand() {
     return float(rand())/float(RAND_MAX);
   }
+  inline glm::vec2 v2rand(float size) {
+    return glm::vec2(frand(-size, size), frand(-size, size));
+  }
   inline float cross(glm::vec2 a, glm::vec2 b) {
     return a.x*b.y - a.y*b.x;
   }
@@ -83,20 +86,8 @@ namespace {
     return x.x*x.x + x.y*x.y;
   }
 
-  void print(glm::mat4 in)
-  {
-    const float* mat = glm::value_ptr(in);
-    for (int i = 0; i < 4; ++i) {
-      for (int j = 0; j < 4; ++j) {
-        printf("%f ", mat[i*4 + j]);
-      }
-      printf("\n");
-    }
-  }
-
   // openGL
-  GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc)
-  {
+  GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSrc, NULL);
     glCompileShader(vertexShader);
@@ -158,8 +149,7 @@ namespace {
     return shaderProgram;
   }
 
-  GLuint loadTexture(const char* filename)
-  {
+  GLuint loadTexture(const char* filename) {
     GLuint result;
     glCreateTextures(GL_TEXTURE_2D, 1, &result);
     glBindTexture(GL_TEXTURE_2D, result);
@@ -181,21 +171,31 @@ namespace {
     return result;
   }
 
-  // physics
+  // Physics
   struct Rect {
     float x,y,w,h;
   };
-  inline Rect point2rect(glm::vec2 pos, float w, float h) {
+  inline Rect operator+(Rect r, glm::vec2 v) {
+    return Rect{r.x + v.x, r.y + v.y, r.w, r.h};
+  }
+  inline Rect operator+(glm::vec2 v, Rect r) {
+    return r + v;
+  }
+  inline Rect rectAround(glm::vec2 pos, float w, float h) {
     return {pos.x - w/2, pos.y - h/2, w, h};
   }
-  inline Rect center(Rect x) {
-    return {x.x + x.w/2, x.y + x.h/2, x.w, x.h};
+  inline glm::vec2 size(Rect x) {
+    return {x.w,x.h};
   }
-  inline glm::vec2 centerPoint(Rect x) {
+  inline glm::vec2 center(Rect x) {
     return {x.x + x.w/2, x.y + x.h/2};
   }
-  inline Rect pad(Rect x, float w, float h) {
-    return {x.x-w/2, x.y-h/2, x.w+w, x.h+h};
+  inline Rect pad(Rect a, Rect b) {
+    a.x -= b.w+b.x;
+    a.y -= b.h+b.y;
+    a.w += b.w;
+    a.h += b.h;
+    return a;
   }
   inline glm::vec2 bottomLeft(Rect x) {
     return {x.x, x.y};
@@ -211,6 +211,9 @@ namespace {
   }
   inline bool checkCollision(Rect a, Rect b) {
     return !(a.y > (b.y+b.h) || (a.y+a.h) < b.y || a.x > (b.x+b.w) || (a.x+a.w) < b.x);
+  }
+  inline bool checkCollision(Rect r, glm::vec2 p) {
+    return !(p.x < r.x || p.x > (r.x + r.w) || p.y > (r.y + r.h) || p.y < r.y);
   }
   struct Line {glm::vec2 a,b;};
   inline glm::vec2 line2vector(Line l) {
@@ -241,12 +244,11 @@ namespace {
     return result;
   }
 
-  // input
+  // Input
   enum {
     KEY_A,KEY_B,KEY_X,KEY_Y,KEY_UP,KEY_DOWN,KEY_LEFT,KEY_RIGHT,KEY_MAX
   };
   bool isDown[KEY_MAX] = {};
-  bool wasPressed[KEY_MAX] = {};
   int keyCodes[KEY_MAX] = {
     SDLK_t,
     SDLK_y,
@@ -258,10 +260,10 @@ namespace {
     SDLK_RIGHT,
   };
 
-  // camera
+  // Camera
   glm::vec2 viewPosition;
 
-  // sprites
+  // Sprites
   const int SPRITES_MAX = 1024;
   int numSprites = 1;
   struct Sprite {
@@ -275,28 +277,80 @@ namespace {
     };
   };
   Sprite sprites[SPRITES_MAX];
-  Sprite* pushSprite(Sprite s) {
+  Sprite* addSprite(Sprite s) {
     sprites[numSprites] = s;
     Sprite* result = sprites + numSprites;
     ++numSprites;
     return result;
   }
 
-  // colors
+  // Colors
   glm::vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 
-  // Player stuff
-  struct Player {
-    glm::vec2 p;
-    glm::vec2 v;
-    Sprite* sprite;
+  // Entities
+  enum class EntityType : uint {
+    player,
+    fairy,
+    wall,
   };
-  Player player {{}, {}, sprites};
+  enum EntityFlag : Uint32 {
+    EntityFlag_Collides = 1 << 0,
+  };
+  struct Entity {
+    EntityType type;
+    Uint32 flags;
 
-  // Level
-  const int WALLS_MAX = 16;
-  int numWalls = 1;
-  Rect walls[WALLS_MAX] = {{0, 0, 0.4, 0.4}};
+    glm::vec2 pos;
+    glm::vec2 vel;
+    Sprite* sprite;
+    Rect hitBox;
+
+    // Familiar stuff
+    Entity** follow;
+
+    // reference location
+    Entity** _referer;
+
+  };
+
+  inline bool isset(Entity* e, EntityFlag flag) {
+    return e->flags & flag;
+  }
+  inline void set(Entity* e, EntityFlag flag) {
+    e->flags |= flag;
+  }
+  inline void unset(Entity* e, EntityFlag flag) {
+    e->flags &= ~flag;
+  }
+
+  const uint ENTITIES_MAX = 1024;
+  uint numEntities = 0;
+  Entity entities[ENTITIES_MAX];
+  uint numReferences = 0;
+  Entity* referer[ENTITIES_MAX];
+  Entity* references[ENTITIES_MAX];
+
+  Entity* addEntity() {
+    SDL_assert(numEntities < ENTITIES_MAX);
+    // TODO: should we reset this?
+    entities[numEntities] = {};
+    referer[numEntities] = NULL;
+    return entities + numEntities++;
+  };
+  Entity** addReference(Entity* target) {
+    references[numReferences] = target;
+    target->_referer = references + numReferences;
+    return references + numReferences++;
+  };
+  void removeEntity(Entity* e) {
+    SDL_assert(numEntities > 0);
+    // swap in the last entity
+    *e = entities[numEntities-1];
+    // update reference position
+    *e->_referer = e;
+
+    --numEntities;
+  };
 
   // memory
   const uint STACK_MAX = MegaBytes(128);
@@ -320,32 +374,72 @@ namespace {
 #define pop(type) _pop(sizeof(type))
 #define popArr(type, count) _pop(sizeof(type)*count)
 
+
+  void print(glm::mat4 in) {
+    const float* mat = glm::value_ptr(in);
+    for (uint i = 0; i < 4; ++i) {
+      for (int j = 0; j < 4; ++j) {
+        printf("%f ", mat[i*4 + j]);
+      }
+      printf("\n");
+    }
+  }
+  void print(const char* str, Rect r) {
+    printf("%s: %f %f %f %f\n", str, r.x, r.y, r.w, r.h);
+  }
+  void print(const char* str, glm::vec2 v) {
+    printf("%s: %f %f\n", str, v.x, v.y);
+  }
 };
 
 int main(int, const char*[]) {
   srand(time(0));
   SDL_Window* window = initSubSystems();
 
+  SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
+
   // init player
+  Entity* player;
   {
-    player.p = {-0.5, -0.5};
-    player.sprite = pushSprite({-0.5, -0.5, 0.2 ,0.2, 11, 7, 70, 88});
+    const float w = 0.1, h = 0.1;
+    player = addEntity();
+    player->pos = {};
+    // TODO: get spritesheet info from external source
+    player->sprite = addSprite({rectAround(player->pos, w, h), 11, 7, 70, 88});
+    player->type = EntityType::player;
+    set(player, EntityFlag_Collides);
+    player->hitBox = rectAround({}, w, h);
   }
 
-  SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
-#if 0
-  for (int i = 0; i < numSprites; ++i) {
-    sprites[i] = {
-      {frand(-1,1), frand(-1,1),
-      0.2, 0.2,},
-      {11,  7,
-      70,  88,}
-    };
-    printf("%f %f\n", sprites[i].screen.x, sprites[i].screen.y);
+  // init fairies
+  {
+    for (int i = 0; i < 10; ++i) {
+      Entity* fairy = addEntity();
+      fairy->sprite = addSprite({0, 0, 0.1, 0.1, 585, 0, 94, 105});
+      fairy->follow = addReference(player);
+      fairy->type = EntityType::fairy;
+    }
   }
-#endif
-  for (int i = 0; i < numWalls; ++i) {
-    pushSprite({center(walls[i]), 0, 282, 142, 142});
+
+  // init level
+  {
+    Rect walls[] = {
+      {-1, -1, 2, 0.1},
+      {-1, -1, 0.1, 2},
+      {-1, 0.9, 2, 0.1},
+      {0.9, -1, 0.1, 2},
+    };
+    for (uint i = 0; i < arrsize(walls); ++i) {
+      Entity* wall = addEntity();
+      wall->pos = center(walls[i]);
+      wall->sprite = addSprite({walls[i], 0, 282, 142, 142});
+      set(wall, EntityFlag_Collides);
+      wall->hitBox = rectAround({}, walls[i].w, walls[i].h);
+      wall->type = EntityType::wall;
+      print("hitbox", wall->hitBox);
+      print("pos", wall->pos);
+      putchar('\n');
+    }
   }
 
 
@@ -441,57 +535,94 @@ int main(int, const char*[]) {
       SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
     }
 
-    // move player
-    {
-      const float ACCELLERATION = 3;
-      const float GRAVITY = 2;
-      const float JUMPPOWER = 0.1;
-      player.v.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
-      // player.v.y = SPEED*dt*isDown[KEY_UP] - SPEED*dt*isDown[KEY_DOWN];
-      if (wasPressed[KEY_A] && numWalls > 0) {
-        glm::vec2 p = centerPoint(*walls);
-        float minD = glm::distance(player.p, p);
-        for (int i = 1; i < numWalls; ++i) {
-          auto d = glm::distance(player.p, centerPoint(walls[i]));
-          if (d < minD) {
-            minD = d;
-            p = centerPoint(walls[i]);
-          }
-        }
-        const float FORCE = 3;
-        player.v = glm::normalize(p - player.p) * FORCE;
-      }
-      /*
-      if (wasPressed[KEY_UP]) {
-        player.v.y = JUMPPOWER;
-      }
-      */
-      player.v.y -= GRAVITY * dt;
+    // update entities
+    for (int i = 0; i < numEntities; ++i) {
+      Entity* e = entities + i;
+      switch (e->type) {
+        case EntityType::player: {
+          const float ACCELLERATION = 6;
+          const float GRAVITY = 6;
+          const float JUMPPOWER = 10;
+          const float DRAG = 0.90;
 
-      // TODO: collision
+          // input movement
+          e->vel.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
+          // e->vel.y += ACCELLERATION*dt*isDown[KEY_UP] - ACCELLERATION*dt*isDown[KEY_DOWN];
+          /*
+          if (wasPressed[KEY_A] && numWalls > 0) {
+            // get closest wall and move towards it
+            glm::vec2 p = center(*walls);
+            float minD = glm::distance(e->pos, p);
+            for (int i = 1; i < numWalls; ++i) {
+              auto d = glm::distance(e->pos, center(walls[i]));
+              if (d < minD) {
+                minD = d;
+                p = center(walls[i]);
+              }
+            }
+            const float FORCE = 3;
+            e->vel = glm::normalize(p - e->pos) * FORCE;
+          }
+          */
+          if (wasPressed[KEY_UP]) {
+            e->vel.y = JUMPPOWER;
+          }
+
+          // physics movement
+          e->vel *= DRAG;
+          e->vel.y -= GRAVITY * dt;
+        } break;
+        case EntityType::fairy: {
+          const float ACCELLERATION = 3.0f + frand(-2, 2);
+          const float DRAG = 0.97;
+          const float NOISE = 0.2;
+          Entity* target = *e->follow;
+          glm::vec2 diff = target->pos - e->pos + v2rand(NOISE);
+          e->vel += ACCELLERATION * dt * glm::normalize(diff);
+          e->vel *= DRAG;
+        } break;
+        case EntityType::wall: {
+        } break;
+      };
+      // collision
+      if (isset(e, EntityFlag_Collides))
       {
         // find the possible collisions for the move vector
-        glm::vec2 oldPos = player.p;
-        glm::vec2 newPos = oldPos + (player.v * dt);
+        glm::vec2 oldPos = e->pos;
+        glm::vec2 newPos = oldPos + (e->vel * dt);
         glm::vec2 move = newPos - oldPos;
-        glm::vec2 hitboxSize = glm::vec2(player.sprite->w, player.sprite->h);
         Rect moveBox = {
-          glm::min(oldPos.x, newPos.x) - hitboxSize.x/2,
-          glm::min(oldPos.y, newPos.y) - hitboxSize.y/2,
-          glm::abs(move.x) + hitboxSize.x,
-          glm::abs(move.y) + hitboxSize.y,
+          glm::min(oldPos.x, newPos.x),
+          glm::min(oldPos.y, newPos.y),
+          glm::abs(move.x),
+          glm::abs(move.y),
         };
-        int numW = 0;
-        Rect* w = 0;
-        for (int i = 0; i < numWalls; ++i) {
-          if (checkCollision(moveBox, walls[i])) {
-            Rect* wall = (Rect*) push(Rect);
-            *wall = walls[i];
-            ++numW; 
-            if (!w) {
-              w = wall;
+        moveBox = pad(moveBox, e->hitBox);
+        uint numHits = 0;
+        Entity** hits = NULL;
+        for (uint j = 0; j < numEntities; ++j) {
+          if (i == j) continue;
+          Entity* target = entities+j;
+          Rect padded = pad(moveBox, target->hitBox);
+          if (target == entities+numEntities-1 && e == entities) {
+            printf("%u %u\n", e->type, entities[j].type);
+            print("moveBox", moveBox);
+            print("padded", padded);
+            print("hitBox", e->hitBox);
+            print("pos", target->pos);
+            printf("%u %u\n", isset(target, EntityFlag_Collides), checkCollision(padded, target->pos));
+          }
+          if (isset(target, EntityFlag_Collides) && checkCollision(padded, target->pos)) {
+            ++numHits;
+            Entity** ptr = (Entity**) push(Entity*);
+            *ptr = target;
+            if (!hits) {
+              hits = ptr;
             }
           }
+        }
+        if (numHits > 1) {
+          printf("numHits: %u\n", numHits);
         }
 
         bool hit;
@@ -499,44 +630,65 @@ int main(int, const char*[]) {
           float t = 1.0f;
           glm::vec2 endPoint = oldPos + move;
           hit = false;
-          glm::vec2 wall;
-          for (int i = 0; i < numW; ++i) {
+          glm::vec2 closestWall;
+          for (uint j = 0; j < numHits; ++j) {
             // find the shortest T for collision
             // TODO: Optimize: If we only use horizontal and vertical lines, we can optimize. Also precalculate corners, we do it twice now
-            Rect padded = pad(w[i], player.sprite->w, player.sprite->h);
+            Rect padded = pad(hits[j]->pos + hits[j]->hitBox, e->hitBox);
+            /*
+            print("padded rect", padded);
+            print("old pos", oldPos);
+            print("new pos", endPoint);
+            print("move", move);
+            */
+            // TODO: Maybe we can have all sides of a polygon here instead?
             Line lines[4] = {
               Line{bottomLeft(padded), bottomRight(padded)},
               Line{bottomRight(padded), topRight(padded)},
               Line{topRight(padded), topLeft(padded)},
               Line{topLeft(padded), bottomLeft(padded)},
             };
-            for (int l = 0; l < 4; ++l) {
+            for (uint l = 0; l < arrsize(lines); ++l) {
               RayCollisionAnswer r = findRayCollision(Line{oldPos, endPoint}, lines[l]);
               if (r.hit && r.t < t) {
-                t = r.t;
+                const float epsilon = 0.001;
+                t = glm::max(0.0f, r.t-epsilon);
                 hit = true;
-                wall = line2vector(lines[l]);
+                closestWall = line2vector(lines[l]);
               }
             }
             SDL_assert(t >= 0);
           }
           if (hit) {
-            auto glide = dot(move, wall)*(1.0f-t) * wall / lengthSqr(wall);
+            auto glide = dot(move, closestWall)*(1.0f-t) * closestWall / lengthSqr(closestWall);
             // move up to wall
-            const float epsilon = 0.1;
-            move *= glm::max(0.0f, t-epsilon);
+            move *= glm::max(0.0f, t);
             // and add glide
             move += glide;
             // go on to recalculate wall collisions, this time with the new move
+            printf("Hit!\n");
+            printf("%u %u\n", (uint) e->type, (uint) entities[i].type);
+            print("moveBox", moveBox);
+            print("hitBox", e->hitBox);
+            print("glide", glide);
+            print("move", move);
+            printf("t: %f\n", t);
           }
         } while (hit);
-        popArr(Rect, numW);
-        SDL_assert(!w || getCurrStackPos() == (void*) w);
-        player.v = move/dt;
+        popArr(Entity*, numHits);
+        SDL_assert(!hits || getCurrStackPos() == (void*) hits);
+        e->vel = move/dt;
       }
-      player.p += player.v * dt;
-      player.sprite->screen.x = player.p.x;
-      player.sprite->screen.y = player.p.y;
+      glm::vec2 move = e->vel * dt;
+      const float moveEpsilon = 0.001;
+      if (glm::abs(move.x) > moveEpsilon) {
+        e->pos.x += move.x;
+        e->sprite->screen.x += move.x;
+      }
+      if (glm::abs(move.y) > moveEpsilon) {
+        e->pos.y += move.y;
+        e->sprite->screen.y += move.y;
+      }
     }
 
     // draw sprites

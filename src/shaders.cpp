@@ -36,7 +36,7 @@ const char* sprite_geometry_shader_src = R"(
     vec2 texOrig = vec2(myInput[0].texCoord.x, myInput[0].texCoord.y + myInput[0].texCoord.w);
     vec2 texSize = vec2(myInput[0].texCoord.z, -myInput[0].texCoord.w);
 
-    vec2 orig = gl_in[0].gl_Position.xy - gl_in[0].gl_Position.zw/2;
+    vec2 orig = gl_in[0].gl_Position.xy;
     vec2 size = gl_in[0].gl_Position.zw;
 
     gl_Position = vec4(orig, 0, 1);
