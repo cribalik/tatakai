@@ -8,15 +8,15 @@
 #include <cstdlib>
 #include <ctime>
 
-typedef unsigned char byte;
+typedef unsigned char Byte;
 #if RELEASE
 #define glOKORDIE 
 #else
 #define glOKORDIE {GLenum __flatland_gl_error = glGetError(); if (__flatland_gl_error != GL_NO_ERROR) {printf("GL error at %s:%u: %u\n", __FILE__, __LINE__, __flatland_gl_error); exit(1);}}
 #endif
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
-typedef unsigned int uint;
-typedef unsigned char byte;
+typedef unsigned int Uint;
+typedef unsigned char Byte;
 #define local_persist static
 #define MegaBytes(x) ((x)*1024LL*1024LL)
 
@@ -24,6 +24,8 @@ typedef unsigned char byte;
 namespace {
 
 # include "shaders.cpp"
+
+  template<class T> void swap(T* a, T* b) {auto tmp = *a; *a = *b; *b = tmp;}
 
   // Init
   int screen_w = 800;
@@ -156,7 +158,7 @@ namespace {
     glOKORDIE;
 
     int w,h;
-    byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGBA);
+    Byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGBA);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
     SOIL_free_image_data(image);
     glOKORDIE;
@@ -209,12 +211,16 @@ namespace {
   inline glm::vec2 bottomRight(Rect x) {
     return {x.x+x.w, x.y};
   }
-  inline bool checkCollision(Rect a, Rect b) {
+  inline bool collision(Rect a, Rect b) {
     return !(a.y > (b.y+b.h) || (a.y+a.h) < b.y || a.x > (b.x+b.w) || (a.x+a.w) < b.x);
   }
-  inline bool checkCollision(Rect r, glm::vec2 p) {
+  inline bool collision(Rect r, glm::vec2 p) {
     return !(p.x < r.x || p.x > (r.x + r.w) || p.y > (r.y + r.h) || p.y < r.y);
   }
+  inline bool collision(glm::vec2 p, Rect r) {
+    return collision(r, p);
+  }
+
   struct Line {glm::vec2 a,b;};
   inline glm::vec2 line2vector(Line l) {
     return l.b - l.a;
@@ -288,15 +294,22 @@ namespace {
   glm::vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 
   // Entities
-  enum class EntityType : uint {
-    player,
-    fairy,
-    wall,
+  enum EntityType : Uint {
+    EntityType_Player,
+    EntityType_Fairy,
+    EntityType_Wall,
   };
   enum EntityFlag : Uint32 {
-    EntityFlag_Collides = 1 << 0,
+    EntityFlag_NoCollide = 1 << 0,
+    EntityFlag_Removed = 1 << 1,
+  };
+  struct Entity;
+  struct EntityRef {
+    Uint id;
+    Entity* entity;
   };
   struct Entity {
+    Uint id; //TODO: should this be 64 bit?
     EntityType type;
     Uint32 flags;
 
@@ -305,12 +318,11 @@ namespace {
     Sprite* sprite;
     Rect hitBox;
 
-    // Familiar stuff
-    Entity** follow;
+    // familiar stuff
+    EntityRef follow;
 
-    // reference location
-    Entity** _referer;
-
+    // player stuff
+    Uint health;
   };
 
   inline bool isset(Entity* e, EntityFlag flag) {
@@ -323,46 +335,81 @@ namespace {
     e->flags &= ~flag;
   }
 
-  const uint ENTITIES_MAX = 1024;
-  uint numEntities = 0;
-  Entity entities[ENTITIES_MAX];
-  uint numReferences = 0;
-  Entity* referer[ENTITIES_MAX];
-  Entity* references[ENTITIES_MAX];
+  struct EntitySlot {
+    bool used;
+    union {
+      Entity entity;
+      EntitySlot* next;
+    };
+  };
+  const Uint ENTITIES_MAX = 1024;
+  Uint numEntities = 0;
+  EntitySlot* freeEntities = NULL;
+  Uint entityId = 0;
+  EntitySlot entities[ENTITIES_MAX] = {};
 
   Entity* addEntity() {
-    SDL_assert(numEntities < ENTITIES_MAX);
-    // TODO: should we reset this?
-    entities[numEntities] = {};
-    referer[numEntities] = NULL;
-    return entities + numEntities++;
+    EntitySlot* slot;
+    if (freeEntities) {
+      slot = freeEntities;
+      freeEntities = freeEntities->next;
+    } else {
+      SDL_assert(numEntities < ENTITIES_MAX);
+      slot = entities + numEntities++;
+    }
+    slot->used = true;
+    slot->entity = {};
+    slot->entity.id = entityId++;
+    return &slot->entity;
   };
-  Entity** addReference(Entity* target) {
-    references[numReferences] = target;
-    target->_referer = references + numReferences;
-    return references + numReferences++;
+  inline EntityRef createRef(Entity* target) {
+    return {target->id, target};
   };
-  void removeEntity(Entity* e) {
+  inline Entity* get(EntityRef ref) {
+    Entity* result = NULL;
+    if (ref.id == ref.entity->id) {
+      result = ref.entity;
+    }
+    return result;
+  };
+  inline EntitySlot* slotOf(Entity* e) {
+    return (EntitySlot*) (((Byte*) e) - offsetof(EntitySlot, entity));
+  }
+  inline void remove(Entity* e) {
     SDL_assert(numEntities > 0);
-    // swap in the last entity
-    *e = entities[numEntities-1];
-    // update reference position
-    *e->_referer = e;
-
-    --numEntities;
+    slotOf(e)->used = false;
+    set(e, EntityFlag_Removed);
   };
+
+  // Iterate entities
+  typedef EntitySlot* EntityIter;
+  void next(EntityIter* iter) {
+    SDL_assert((*iter) >= entities && (*iter) < entities+ENTITIES_MAX);
+    do ++(*iter); while (!(*iter)->used && (*iter) != entities+ENTITIES_MAX);
+    if ((*iter) == entities + ENTITIES_MAX) (*iter) = NULL;
+  }
+  EntityIter iterEntities() {
+    EntitySlot* iter = entities;
+    while (!iter->used && iter != entities+ENTITIES_MAX) ++iter;
+    if (iter == entities+ENTITIES_MAX) iter = NULL;
+    return iter;
+  }
+  Entity* get(EntityIter iter) {
+    SDL_assert(iter->used);
+    return &iter->entity;
+  }
 
   // memory
-  const uint STACK_MAX = MegaBytes(128);
-  byte _stack_data[STACK_MAX];
-  byte* _stack_curr = _stack_data;
-  inline void* _push(uint size) {
+  const Uint STACK_MAX = MegaBytes(128);
+  Byte _stack_data[STACK_MAX];
+  Byte* _stack_curr = _stack_data;
+  inline void* _push(Uint size) {
     SDL_assert(_stack_curr + size < _stack_data + STACK_MAX);
-    byte* p = _stack_curr;
+    Byte* p = _stack_curr;
     _stack_curr += size;
     return p;
   }
-  inline void _pop(uint size) {
+  inline void _pop(Uint size) {
     SDL_assert(_stack_curr - size >= _stack_data);
     _stack_curr -= size;
   }
@@ -377,7 +424,7 @@ namespace {
 
   void print(glm::mat4 in) {
     const float* mat = glm::value_ptr(in);
-    for (uint i = 0; i < 4; ++i) {
+    for (Uint i = 0; i < 4; ++i) {
       for (int j = 0; j < 4; ++j) {
         printf("%f ", mat[i*4 + j]);
       }
@@ -389,6 +436,35 @@ namespace {
   }
   void print(const char* str, glm::vec2 v) {
     printf("%s: %f %f\n", str, v.x, v.y);
+  }
+
+  // Gameplay
+  inline bool checkTypeAndSwap(Entity** a, Entity** b, EntityType at, EntityType bt) {
+    SDL_assert((*a)->type <= (*b)->type);
+    if (at > bt) {
+      swap(a,b);
+    }
+    bool result = (*a)->type == at && (*b)->type == bt;
+    return result;
+  }
+  inline void orderByType(Entity** a, Entity** b) {
+    if ((*a)->type > (*b)->type) {
+      swap(a,b);
+    }
+  }
+  bool processCollision(Entity* a, Entity* b, glm::vec2 start, glm::vec2 end, bool entered) {
+    bool result = false;
+    orderByType(&a, &b);
+
+    if (checkTypeAndSwap(&a, &b, EntityType_Player, EntityType_Fairy)) {
+      // a is now player, b is fairy
+      printf("Passing through\n");
+      a->health += b->health;
+      remove(b);
+      result = true;
+    }
+
+    return result;
   }
 };
 
@@ -406,9 +482,9 @@ int main(int, const char*[]) {
     player->pos = {};
     // TODO: get spritesheet info from external source
     player->sprite = addSprite({rectAround(player->pos, w, h), 11, 7, 70, 88});
-    player->type = EntityType::player;
-    set(player, EntityFlag_Collides);
+    player->type = EntityType_Player;
     player->hitBox = rectAround({}, w, h);
+    player->health = 10;
   }
 
   // init fairies
@@ -416,8 +492,9 @@ int main(int, const char*[]) {
     for (int i = 0; i < 10; ++i) {
       Entity* fairy = addEntity();
       fairy->sprite = addSprite({0, 0, 0.1, 0.1, 585, 0, 94, 105});
-      fairy->follow = addReference(player);
-      fairy->type = EntityType::fairy;
+      fairy->follow = createRef(player);
+      fairy->type = EntityType_Fairy;
+      fairy->health = 5;
     }
   }
 
@@ -429,13 +506,12 @@ int main(int, const char*[]) {
       {-1, 0.9, 2, 0.1},
       {0.9, -1, 0.1, 2},
     };
-    for (uint i = 0; i < arrsize(walls); ++i) {
+    for (Uint i = 0; i < arrsize(walls); ++i) {
       Entity* wall = addEntity();
       wall->pos = center(walls[i]);
       wall->sprite = addSprite({walls[i], 0, 282, 142, 142});
-      set(wall, EntityFlag_Collides);
       wall->hitBox = rectAround({}, walls[i].w, walls[i].h);
-      wall->type = EntityType::wall;
+      wall->type = EntityType_Wall;
       print("hitbox", wall->hitBox);
       print("pos", wall->pos);
       putchar('\n');
@@ -536,60 +612,59 @@ int main(int, const char*[]) {
     }
 
     // update entities
-    for (int i = 0; i < numEntities; ++i) {
-      Entity* e = entities + i;
-      switch (e->type) {
-        case EntityType::player: {
+    for (EntityIter iter = iterEntities(); iter; next(&iter)) {
+      Entity* entity = get(iter);
+      switch (entity->type) {
+        case EntityType_Player: {
           const float ACCELLERATION = 6;
           const float GRAVITY = 6;
           const float JUMPPOWER = 10;
           const float DRAG = 0.90;
 
           // input movement
-          e->vel.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
-          // e->vel.y += ACCELLERATION*dt*isDown[KEY_UP] - ACCELLERATION*dt*isDown[KEY_DOWN];
+          entity->vel.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
+          // entity->vel.y += ACCELLERATION*dt*isDown[KEY_UP] - ACCELLERATION*dt*isDown[KEY_DOWN];
           /*
           if (wasPressed[KEY_A] && numWalls > 0) {
             // get closest wall and move towards it
             glm::vec2 p = center(*walls);
-            float minD = glm::distance(e->pos, p);
+            float minD = glm::distance(entity->pos, p);
             for (int i = 1; i < numWalls; ++i) {
-              auto d = glm::distance(e->pos, center(walls[i]));
+              auto d = glm::distance(entity->pos, center(walls[i]));
               if (d < minD) {
                 minD = d;
                 p = center(walls[i]);
               }
             }
             const float FORCE = 3;
-            e->vel = glm::normalize(p - e->pos) * FORCE;
+            entity->vel = glm::normalize(p - entity->pos) * FORCE;
           }
           */
           if (wasPressed[KEY_UP]) {
-            e->vel.y = JUMPPOWER;
+            entity->vel.y = JUMPPOWER;
           }
 
           // physics movement
-          e->vel *= DRAG;
-          e->vel.y -= GRAVITY * dt;
+          entity->vel *= DRAG;
+          entity->vel.y -= GRAVITY * dt;
         } break;
-        case EntityType::fairy: {
+        case EntityType_Fairy: {
           const float ACCELLERATION = 3.0f + frand(-2, 2);
           const float DRAG = 0.97;
           const float NOISE = 0.2;
-          Entity* target = *e->follow;
-          glm::vec2 diff = target->pos - e->pos + v2rand(NOISE);
-          e->vel += ACCELLERATION * dt * glm::normalize(diff);
-          e->vel *= DRAG;
+          Entity* target = get(entity->follow);
+          glm::vec2 diff = target->pos - entity->pos + v2rand(NOISE);
+          entity->vel += ACCELLERATION * dt * glm::normalize(diff);
+          entity->vel *= DRAG;
         } break;
-        case EntityType::wall: {
+        case EntityType_Wall: {
         } break;
       };
       // collision
-      if (isset(e, EntityFlag_Collides))
-      {
+      if (!isset(entity, EntityFlag_NoCollide)) {
         // find the possible collisions for the move vector
-        glm::vec2 oldPos = e->pos;
-        glm::vec2 newPos = oldPos + (e->vel * dt);
+        glm::vec2 oldPos = entity->pos;
+        glm::vec2 newPos = oldPos + (entity->vel * dt);
         glm::vec2 move = newPos - oldPos;
         Rect moveBox = {
           glm::min(oldPos.x, newPos.x),
@@ -597,22 +672,24 @@ int main(int, const char*[]) {
           glm::abs(move.x),
           glm::abs(move.y),
         };
-        moveBox = pad(moveBox, e->hitBox);
-        uint numHits = 0;
+        moveBox = pad(moveBox, entity->hitBox);
+        Uint numHits = 0;
         Entity** hits = NULL;
-        for (uint j = 0; j < numEntities; ++j) {
-          if (i == j) continue;
-          Entity* target = entities+j;
+        for (auto target_iter = iterEntities(); target_iter; next(&target_iter)) {
+          if (iter == target_iter) continue;
+          Entity* target = get(target_iter);
           Rect padded = pad(moveBox, target->hitBox);
-          if (target == entities+numEntities-1 && e == entities) {
-            printf("%u %u\n", e->type, entities[j].type);
+          /*
+          if (target == entities+numEntities-1 && entity == entities) {
+            printf("%u %u\n", entity->type, target->type);
             print("moveBox", moveBox);
             print("padded", padded);
-            print("hitBox", e->hitBox);
+            print("hitBox", entity->hitBox);
             print("pos", target->pos);
-            printf("%u %u\n", isset(target, EntityFlag_Collides), checkCollision(padded, target->pos));
+            printf("%u %u\n", isset(target, EntityFlag_Collides), collision(padded, target->pos));
           }
-          if (isset(target, EntityFlag_Collides) && checkCollision(padded, target->pos)) {
+          */
+          if (!isset(target, EntityFlag_NoCollide) && collision(padded, target->pos)) {
             ++numHits;
             Entity** ptr = (Entity**) push(Entity*);
             *ptr = target;
@@ -621,73 +698,76 @@ int main(int, const char*[]) {
             }
           }
         }
-        if (numHits > 1) {
-          printf("numHits: %u\n", numHits);
-        }
 
-        bool hit;
-        do {
-          float t = 1.0f;
-          glm::vec2 endPoint = oldPos + move;
-          hit = false;
-          glm::vec2 closestWall;
-          for (uint j = 0; j < numHits; ++j) {
-            // find the shortest T for collision
-            // TODO: Optimize: If we only use horizontal and vertical lines, we can optimize. Also precalculate corners, we do it twice now
-            Rect padded = pad(hits[j]->pos + hits[j]->hitBox, e->hitBox);
-            /*
-            print("padded rect", padded);
-            print("old pos", oldPos);
-            print("new pos", endPoint);
-            print("move", move);
-            */
-            // TODO: Maybe we can have all sides of a polygon here instead?
-            Line lines[4] = {
-              Line{bottomLeft(padded), bottomRight(padded)},
-              Line{bottomRight(padded), topRight(padded)},
-              Line{topRight(padded), topLeft(padded)},
-              Line{topLeft(padded), bottomLeft(padded)},
-            };
-            for (uint l = 0; l < arrsize(lines); ++l) {
-              RayCollisionAnswer r = findRayCollision(Line{oldPos, endPoint}, lines[l]);
-              if (r.hit && r.t < t) {
-                const float epsilon = 0.001;
-                t = glm::max(0.0f, r.t-epsilon);
-                hit = true;
-                closestWall = line2vector(lines[l]);
+        if (hits) {
+          for (int iters = 0; iters < 4; ++iters) {
+            float t = 1.0f;
+            Entity** hit = NULL;
+            glm::vec2 closestWall;
+            glm::vec2 endPoint = oldPos + move;
+            for (Uint j = 0; j < numHits; ++j) {
+              // find the shortest T for collision
+              // TODO: Optimize: If we only use horizontal and vertical lines, we can optimize. Also precalculate corners, we do it twice now
+              Rect padded = pad(hits[j]->pos + hits[j]->hitBox, entity->hitBox);
+              // TODO: In the future, maybe we can have all sides of a polygon here instead?
+              Line lines[4] = {
+                Line{bottomLeft(padded), bottomRight(padded)},
+                Line{bottomRight(padded), topRight(padded)},
+                Line{topRight(padded), topLeft(padded)},
+                Line{topLeft(padded), bottomLeft(padded)},
+              };
+              for (Uint l = 0; l < arrsize(lines); ++l) {
+                RayCollisionAnswer r = findRayCollision(Line{oldPos, endPoint}, lines[l]);
+                if (r.hit && r.t < t) {
+                  const float epsilon = 0.001;
+                  t = glm::max(0.0f, r.t-epsilon);
+                  hit = hits + j;
+                  closestWall = line2vector(lines[l]);
+                }
               }
+              SDL_assert(t >= 0);
             }
-            SDL_assert(t >= 0);
-          }
-          if (hit) {
-            auto glide = dot(move, closestWall)*(1.0f-t) * closestWall / lengthSqr(closestWall);
-            // move up to wall
-            move *= glm::max(0.0f, t);
-            // and add glide
-            move += glide;
-            // go on to recalculate wall collisions, this time with the new move
-            printf("Hit!\n");
-            printf("%u %u\n", (uint) e->type, (uint) entities[i].type);
-            print("moveBox", moveBox);
-            print("hitBox", e->hitBox);
-            print("glide", glide);
-            print("move", move);
-            printf("t: %f\n", t);
-          }
-        } while (hit);
-        popArr(Entity*, numHits);
-        SDL_assert(!hits || getCurrStackPos() == (void*) hits);
-        e->vel = move/dt;
+            if (hit) {
+              printf("Hit!\n");
+              printf("%u %u\n", (Uint) entity->type, (Uint) entity->type);
+              print("moveBox", moveBox);
+              print("hitBox", entity->hitBox);
+              print("move", move);
+              printf("t: %f\n", t);
+              Entity* hitEntity = *hit;
+              bool passThrough = processCollision(entity, hitEntity, oldPos, endPoint, collision(hitEntity->hitBox + hitEntity->pos, endPoint));
+              if (!passThrough) {
+                auto glide = dot(move, closestWall)*(1.0f-t) * closestWall / lengthSqr(closestWall);
+                print("glide", glide);
+                // move up to wall
+                move *= glm::max(0.0f, t);
+                // and add glide
+                move += glide;
+                // go on to recalculate wall collisions, this time with the new move
+              } else {
+                // We remove this from hittable things and continue towards other collision
+                hits[hit-hits] = hits[--numHits];
+                pop(Entity*);
+                break;
+              }
+            } else {
+              break;
+            }
+          };
+          popArr(Entity*, numHits);
+          SDL_assert(getCurrStackPos() == (void*) hits);
+        }
+        entity->vel = move/dt;
       }
-      glm::vec2 move = e->vel * dt;
+      glm::vec2 move = entity->vel * dt;
       const float moveEpsilon = 0.001;
       if (glm::abs(move.x) > moveEpsilon) {
-        e->pos.x += move.x;
-        e->sprite->screen.x += move.x;
+        entity->pos.x += move.x;
+        entity->sprite->screen.x += move.x;
       }
       if (glm::abs(move.y) > moveEpsilon) {
-        e->pos.y += move.y;
-        e->sprite->screen.y += move.y;
+        entity->pos.y += move.y;
+        entity->sprite->screen.y += move.y;
       }
     }
 
