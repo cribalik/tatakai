@@ -1,5 +1,5 @@
-LFLAGS = -lGLEW -lSDL2 -lGL -lSOIL
-CFLAGS = -std=c++11 -Wall -g
+LFLAGS = -lGLEW -lSDL2 -lGL -lSOIL -lfreetype
+CFLAGS = -std=c++11 -Wall -g -I/usr/include/freetype2 -Iinclude
 
 all: src/*
 	@g++ $(CFLAGS) $(IFLAGS) src/flatland.cpp $(LFLAGS)

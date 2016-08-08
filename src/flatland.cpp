@@ -6,7 +6,10 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
 #include <cstdlib>
-#include <ctime>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#define STB_RECT_PACK_IMPLEMENTATION 1
+#include <stb_rect_pack.h>
 
 typedef unsigned char Byte;
 #if RELEASE
@@ -19,17 +22,22 @@ typedef unsigned int Uint;
 typedef unsigned char Byte;
 #define local_persist static
 #define MegaBytes(x) ((x)*1024LL*1024LL)
+#define unimplemented printf("unimplemented method %s:%u\n", __FILE__, __LINE__)
 
 
 namespace {
 
 # include "shaders.cpp"
 
+  using glm::vec2;
+  using glm::vec3;
+
   template<class T> void swap(T* a, T* b) {auto tmp = *a; *a = *b; *b = tmp;}
 
   // Init
   int screen_w = 800;
   int screen_h = 600;
+  FT_Library ft;
   SDL_Window* initSubSystems()
   {
     int res;
@@ -56,6 +64,11 @@ namespace {
 
     glViewport(0, 0, screen_w, screen_h);
 
+    if (FT_Init_FreeType(&ft)) {
+      puts("Failed to init freetype\n");
+      exit(1);
+    }
+
     return window;
   }
 
@@ -78,118 +91,33 @@ namespace {
   inline float frand() {
     return float(rand())/float(RAND_MAX);
   }
-  inline glm::vec2 v2rand(float size) {
-    return glm::vec2(frand(-size, size), frand(-size, size));
+  inline vec2 v2rand(float size) {
+    return vec2(frand(-size, size), frand(-size, size));
   }
-  inline float cross(glm::vec2 a, glm::vec2 b) {
+  inline float cross(vec2 a, vec2 b) {
     return a.x*b.y - a.y*b.x;
   }
-  inline float lengthSqr(glm::vec2 x) {
+  inline float lengthSqr(vec2 x) {
     return x.x*x.x + x.y*x.y;
-  }
-
-  // openGL
-  GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
-    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertexShader, 1, &vertexShaderSrc, NULL);
-    glCompileShader(vertexShader);
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-      if (!success) {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    GLuint geometryShader = glCreateShader(GL_GEOMETRY_SHADER);
-    glShaderSource(geometryShader, 1, &geometryShaderSrc, NULL);
-    glCompileShader(geometryShader);
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetShaderiv(geometryShader, GL_COMPILE_STATUS, &success);
-      if (!success) {
-        glGetShaderInfoLog(geometryShader, 512, NULL, infoLog);
-        printf("ERROR::SHADER::GEOMETRY::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragmentShader, 1, &fragmentShaderSrc, NULL);
-    glCompileShader(fragmentShader);
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-      if (!success) {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    GLuint shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, fragmentShader);
-    glAttachShader(shaderProgram, geometryShader);
-    glAttachShader(shaderProgram, vertexShader);
-    glLinkProgram(shaderProgram);
-
-    {
-      GLint success;
-      GLchar infoLog[512];
-      glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-      if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        printf("ERROR::SHADER::PROGRAM::COMPILATION_FAILED: %s\n", infoLog);
-      }
-    }
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-    glOKORDIE;
-    return shaderProgram;
-  }
-
-  GLuint loadTexture(const char* filename) {
-    GLuint result;
-    glCreateTextures(GL_TEXTURE_2D, 1, &result);
-    glBindTexture(GL_TEXTURE_2D, result);
-    glOKORDIE;
-
-    int w,h;
-    Byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGBA);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
-    SOIL_free_image_data(image);
-    glOKORDIE;
-
-    /*
-    glGenerateMipmap(GL_TEXTURE_2D);
-    */
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glOKORDIE;
-
-    return result;
   }
 
   // Physics
   struct Rect {
     float x,y,w,h;
   };
-  inline Rect operator+(Rect r, glm::vec2 v) {
+  inline Rect operator+(Rect r, vec2 v) {
     return Rect{r.x + v.x, r.y + v.y, r.w, r.h};
   }
-  inline Rect operator+(glm::vec2 v, Rect r) {
+  inline Rect operator+(vec2 v, Rect r) {
     return r + v;
   }
-  inline Rect rectAround(glm::vec2 pos, float w, float h) {
+  inline Rect rectAround(vec2 pos, float w, float h) {
     return {pos.x - w/2, pos.y - h/2, w, h};
   }
-  inline glm::vec2 size(Rect x) {
+  inline vec2 size(Rect x) {
     return {x.w,x.h};
   }
-  inline glm::vec2 center(Rect x) {
+  inline vec2 center(Rect x) {
     return {x.x + x.w/2, x.y + x.h/2};
   }
   inline Rect pad(Rect a, Rect b) {
@@ -199,37 +127,37 @@ namespace {
     a.h += b.h;
     return a;
   }
-  inline glm::vec2 bottomLeft(Rect x) {
+  inline vec2 bottomLeft(Rect x) {
     return {x.x, x.y};
   }
-  inline glm::vec2 topLeft(Rect x) {
+  inline vec2 topLeft(Rect x) {
     return {x.x, x.y+x.h};
   }
-  inline glm::vec2 topRight(Rect x) {
+  inline vec2 topRight(Rect x) {
     return {x.x+x.w, x.y+x.h};
   }
-  inline glm::vec2 bottomRight(Rect x) {
+  inline vec2 bottomRight(Rect x) {
     return {x.x+x.w, x.y};
   }
   inline bool collision(Rect a, Rect b) {
     return !(a.y > (b.y+b.h) || (a.y+a.h) < b.y || a.x > (b.x+b.w) || (a.x+a.w) < b.x);
   }
-  inline bool collision(Rect r, glm::vec2 p) {
+  inline bool collision(Rect r, vec2 p) {
     return !(p.x < r.x || p.x > (r.x + r.w) || p.y > (r.y + r.h) || p.y < r.y);
   }
-  inline bool collision(glm::vec2 p, Rect r) {
+  inline bool collision(vec2 p, Rect r) {
     return collision(r, p);
   }
 
-  struct Line {glm::vec2 a,b;};
-  inline glm::vec2 line2vector(Line l) {
+  struct Line {vec2 a,b;};
+  inline vec2 line2vector(Line l) {
     return l.b - l.a;
   }
   struct RayCollisionAnswer {
     bool hit;
     float t;
   };
-  RayCollisionAnswer findRayCollision(Line ray, Line target) {
+  RayCollisionAnswer rayCollision(Line ray, Line target) {
     const float epsilon = 0.0001;
     using namespace glm;
     RayCollisionAnswer result = {};
@@ -267,7 +195,7 @@ namespace {
   };
 
   // Camera
-  glm::vec2 viewPosition;
+  vec2 viewPosition;
 
   // Sprites
   const int SPRITES_MAX = 1024;
@@ -283,15 +211,59 @@ namespace {
     };
   };
   Sprite sprites[SPRITES_MAX];
-  Sprite* addSprite(Sprite s) {
-    sprites[numSprites] = s;
-    Sprite* result = sprites + numSprites;
+  union SpriteRefSlot {
+    Sprite* sprite;
+    SpriteRefSlot* next;
+  };
+  typedef SpriteRefSlot SpriteRef;
+  SpriteRefSlot* freeSpriteRefs = 0;
+  uint numSpriteRefs = 0;
+  SpriteRefSlot spriteReferences[SPRITES_MAX]; // TODO: use hashmap instead
+  SpriteRefSlot* spriteReferencesInverse[SPRITES_MAX];
+  SpriteRef* addSprite(Sprite s) {
+    SDL_assert(numSprites < SPRITES_MAX);
+    if (numSprites == SPRITES_MAX) {
+      return 0;
+    }
+    Sprite* sprite = sprites + numSprites;
+    // create a reference to the new sprite
+    SpriteRefSlot* slot;
+    if (freeSpriteRefs) {
+      slot = freeSpriteRefs;
+      freeSpriteRefs = freeSpriteRefs->next;
+    } else {
+      SDL_assert(numSpriteRefs < SPRITES_MAX); // TODO: return null here if it fails
+      if (numSpriteRefs == SPRITES_MAX) {
+        return 0;
+      } else {
+        slot = spriteReferences + numSpriteRefs++;
+      }
+    }
+    *sprite = s;
+    slot->sprite = sprite;
+    spriteReferencesInverse[numSprites] = slot;
     ++numSprites;
-    return result;
+    return slot;
+  }
+  inline void _remove(SpriteRef* ref) {
+    SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
+    // swap sprite data with the last one
+    uint index = ref->sprite - sprites;
+    sprites[index] = sprites[--numSprites];
+    // and update the reference for the last one
+    spriteReferencesInverse[index] = spriteReferencesInverse[numSprites];
+    spriteReferencesInverse[index]->sprite = ref->sprite;
+    // and add the reference to the freelist
+    ref->next = freeSpriteRefs;
+    freeSpriteRefs = ref;
+  }
+  inline Sprite* get(SpriteRef* ref) {
+    SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
+    return ref->sprite;
   }
 
   // Colors
-  glm::vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
+  vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 
   // Entities
   enum EntityType : Uint {
@@ -313,9 +285,9 @@ namespace {
     EntityType type;
     Uint32 flags;
 
-    glm::vec2 pos;
-    glm::vec2 vel;
-    Sprite* sprite;
+    vec2 pos;
+    vec2 vel;
+    SpriteRef* sprite;
     Rect hitBox;
 
     // familiar stuff
@@ -344,7 +316,7 @@ namespace {
   };
   const Uint ENTITIES_MAX = 1024;
   Uint numEntities = 0;
-  EntitySlot* freeEntities = NULL;
+  EntitySlot* freeEntities = 0;
   Uint entityId = 0;
   EntitySlot entities[ENTITIES_MAX] = {};
 
@@ -366,7 +338,7 @@ namespace {
     return {target->id, target};
   };
   inline Entity* get(EntityRef ref) {
-    Entity* result = NULL;
+    Entity* result = 0;
     if (ref.id == ref.entity->id) {
       result = ref.entity;
     }
@@ -377,8 +349,24 @@ namespace {
   }
   inline void remove(Entity* e) {
     SDL_assert(numEntities > 0);
-    slotOf(e)->used = false;
     set(e, EntityFlag_Removed);
+  };
+  inline void _remove(Entity* e) {
+    SDL_assert(slotOf(e) >= entities && slotOf(e) < entities+ENTITIES_MAX);
+    // FIXME: Call this code at the end of the frame
+    EntitySlot* slot = slotOf(e);
+    slot->used = false;
+    freeEntities = slot;
+    slot->next = freeEntities;
+    if (e->sprite) {
+      _remove(e->sprite);
+    }
+  };
+  inline void remove(EntityRef ref) { // should warn us about double frees
+    SDL_assert(ref.id == ref.entity->id);
+    if (ref.id == ref.entity->id) {
+      remove(ref.entity);
+    }
   };
 
   // Iterate entities
@@ -386,12 +374,12 @@ namespace {
   void next(EntityIter* iter) {
     SDL_assert((*iter) >= entities && (*iter) < entities+ENTITIES_MAX);
     do ++(*iter); while (!(*iter)->used && (*iter) != entities+ENTITIES_MAX);
-    if ((*iter) == entities + ENTITIES_MAX) (*iter) = NULL;
+    if ((*iter) == entities + ENTITIES_MAX) (*iter) = 0;
   }
   EntityIter iterEntities() {
     EntitySlot* iter = entities;
     while (!iter->used && iter != entities+ENTITIES_MAX) ++iter;
-    if (iter == entities+ENTITIES_MAX) iter = NULL;
+    if (iter == entities+ENTITIES_MAX) iter = 0;
     return iter;
   }
   Entity* get(EntityIter iter) {
@@ -401,26 +389,163 @@ namespace {
 
   // memory
   const Uint STACK_MAX = MegaBytes(128);
-  Byte _stack_data[STACK_MAX];
-  Byte* _stack_curr = _stack_data;
+  Byte stack[STACK_MAX];
+  Byte* stackCurr = stack;
   inline void* _push(Uint size) {
-    SDL_assert(_stack_curr + size < _stack_data + STACK_MAX);
-    Byte* p = _stack_curr;
-    _stack_curr += size;
+    SDL_assert(stackCurr + size < stack + STACK_MAX);
+    Byte* p = stackCurr;
+    stackCurr += size;
     return p;
   }
   inline void _pop(Uint size) {
-    SDL_assert(_stack_curr - size >= _stack_data);
-    _stack_curr -= size;
+    SDL_assert(stackCurr - size >= stack);
+    stackCurr -= size;
   }
   void* getCurrStackPos() {
-    return _stack_curr;
+    return stackCurr;
   }
 #define push(type) _push(sizeof(type))
 #define pushArr(type, count) _push(sizeof(type)*count)
 #define pop(type) _pop(sizeof(type))
 #define popArr(type, count) _pop(sizeof(type)*count)
 
+  // openGL
+  GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
+    GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertexShader, 1, &vertexShaderSrc, 0);
+    glCompileShader(vertexShader);
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(vertexShader, 512, 0, infoLog);
+        printf("ERROR::SHADER::VERTEX::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    GLuint geometryShader = glCreateShader(GL_GEOMETRY_SHADER);
+    glShaderSource(geometryShader, 1, &geometryShaderSrc, 0);
+    glCompileShader(geometryShader);
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetShaderiv(geometryShader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(geometryShader, 512, 0, infoLog);
+        printf("ERROR::SHADER::GEOMETRY::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragmentShader, 1, &fragmentShaderSrc, 0);
+    glCompileShader(fragmentShader);
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(fragmentShader, 512, 0, infoLog);
+        printf("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    GLuint shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, fragmentShader);
+    glAttachShader(shaderProgram, geometryShader);
+    glAttachShader(shaderProgram, vertexShader);
+    glLinkProgram(shaderProgram);
+
+    {
+      GLint success;
+      GLchar infoLog[512];
+      glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+      if (!success) {
+        glGetProgramInfoLog(shaderProgram, 512, 0, infoLog);
+        printf("ERROR::SHADER::PROGRAM::COMPILATION_FAILED: %s\n", infoLog);
+      }
+    }
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    glOKORDIE;
+    return shaderProgram;
+  }
+
+  GLuint loadTexture(const char* filename) {
+    GLuint result;
+    glCreateTextures(GL_TEXTURE_2D, 1, &result);
+    glBindTexture(GL_TEXTURE_2D, result);
+    glOKORDIE;
+
+    int w,h;
+    Byte* image = SOIL_load_image(filename, &w, &h, 0, SOIL_LOAD_RGBA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+    SOIL_free_image_data(image);
+    glOKORDIE;
+
+    /*
+    glGenerateMipmap(GL_TEXTURE_2D);
+    */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glOKORDIE;
+
+    return result;
+  }
+
+  const uint START_CHAR = 32;
+  const uint END_CHAR = 129;
+  GLuint loadFont(const char* filename, uint height) {
+    FT_Face face;
+    if (FT_New_Face(ft, filename, 0, &face)) {
+      printf("Failed to load font at %s\n", filename);
+      exit(1);
+    }
+    FT_Set_Pixel_Sizes(face, 0, height);
+
+    stbrp_rect rects[END_CHAR-START_CHAR];
+    stbrp_rect* rect = rects;
+    for (uint i = START_CHAR; i < END_CHAR; ++i) {
+      if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
+        printf("failed to load char %c\n", i);
+        continue;
+      }
+      rect->id = i-START_CHAR;
+      rect->w = face->glyph->bitmap.width;
+      rect->h = face->glyph->bitmap.rows;
+      ++rect;
+    }
+    stbrp_context c;
+    stbrp_init_target(&c, 1024, 1024, (stbrp_node*) stackCurr, 1024);
+    stbrp_pack_rects(&c, rects, arrsize(rects));
+    
+    uint maxW = 0, maxH = 0;
+    for (stbrp_rect* r = rects; r < rects+arrsize(rects); ++r) {
+      SDL_assert(r->was_packed);
+      if (!r->was_packed) {
+        puts("Failed to pack font");
+      }
+      printf("%u %i %i\n", r->id, r->x, r->y);
+      maxW = glm::max((uint) r->x + r->w, maxW);
+      maxH = glm::max((uint) r->y + r->h, maxW);
+    }
+
+    GLuint tex;
+    glActiveTexture(GL_TEXTURE0);
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, maxW, maxH, 0, GL_ALPHA, GL_UNSIGNED_BYTE, 0);
+    for (uint i = START_CHAR; i < END_CHAR; ++i) {
+      if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
+        printf("failed to load char %c at %u\n", i, __LINE__);
+        continue;
+      }
+      glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x, rect->y, rect->w, rect->h, GL_ALPHA, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
+    }
+    return 0;
+  }
 
   void print(glm::mat4 in) {
     const float* mat = glm::value_ptr(in);
@@ -434,7 +559,7 @@ namespace {
   void print(const char* str, Rect r) {
     printf("%s: %f %f %f %f\n", str, r.x, r.y, r.w, r.h);
   }
-  void print(const char* str, glm::vec2 v) {
+  void print(const char* str, vec2 v) {
     printf("%s: %f %f\n", str, v.x, v.y);
   }
 
@@ -452,7 +577,7 @@ namespace {
       swap(a,b);
     }
   }
-  bool processCollision(Entity* a, Entity* b, glm::vec2 start, glm::vec2 end, bool entered) {
+  bool processCollision(Entity* a, Entity* b, vec2 start, vec2 end, bool entered) {
     bool result = false;
     orderByType(&a, &b);
 
@@ -469,8 +594,9 @@ namespace {
 };
 
 int main(int, const char*[]) {
-  srand(time(0));
+  srand(SDL_GetPerformanceCounter());
   SDL_Window* window = initSubSystems();
+  loadFont("assets/monaco.ttf", 48);
 
   SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
 
@@ -562,7 +688,7 @@ int main(int, const char*[]) {
 
   // set lights
   SDL_SetRelativeMouseMode(SDL_TRUE);
-  SDL_GetRelativeMouseState(NULL, NULL);
+  SDL_GetRelativeMouseState(0, 0);
 
   Timer loopTime = startTimer();
   int loopCount = 0;
@@ -627,7 +753,7 @@ int main(int, const char*[]) {
           /*
           if (wasPressed[KEY_A] && numWalls > 0) {
             // get closest wall and move towards it
-            glm::vec2 p = center(*walls);
+            vec2 p = center(*walls);
             float minD = glm::distance(entity->pos, p);
             for (int i = 1; i < numWalls; ++i) {
               auto d = glm::distance(entity->pos, center(walls[i]));
@@ -653,7 +779,7 @@ int main(int, const char*[]) {
           const float DRAG = 0.97;
           const float NOISE = 0.2;
           Entity* target = get(entity->follow);
-          glm::vec2 diff = target->pos - entity->pos + v2rand(NOISE);
+          vec2 diff = target->pos - entity->pos + v2rand(NOISE);
           entity->vel += ACCELLERATION * dt * glm::normalize(diff);
           entity->vel *= DRAG;
         } break;
@@ -663,9 +789,9 @@ int main(int, const char*[]) {
       // collision
       if (!isset(entity, EntityFlag_NoCollide)) {
         // find the possible collisions for the move vector
-        glm::vec2 oldPos = entity->pos;
-        glm::vec2 newPos = oldPos + (entity->vel * dt);
-        glm::vec2 move = newPos - oldPos;
+        vec2 oldPos = entity->pos;
+        vec2 newPos = oldPos + (entity->vel * dt);
+        vec2 move = newPos - oldPos;
         Rect moveBox = {
           glm::min(oldPos.x, newPos.x),
           glm::min(oldPos.y, newPos.y),
@@ -674,7 +800,7 @@ int main(int, const char*[]) {
         };
         moveBox = pad(moveBox, entity->hitBox);
         Uint numHits = 0;
-        Entity** hits = NULL;
+        Entity** hits = 0;
         for (auto target_iter = iterEntities(); target_iter; next(&target_iter)) {
           if (iter == target_iter) continue;
           Entity* target = get(target_iter);
@@ -702,9 +828,9 @@ int main(int, const char*[]) {
         if (hits) {
           for (int iters = 0; iters < 4; ++iters) {
             float t = 1.0f;
-            Entity** hit = NULL;
-            glm::vec2 closestWall;
-            glm::vec2 endPoint = oldPos + move;
+            Entity** hit = 0;
+            vec2 closestWall;
+            vec2 endPoint = oldPos + move;
             for (Uint j = 0; j < numHits; ++j) {
               // find the shortest T for collision
               // TODO: Optimize: If we only use horizontal and vertical lines, we can optimize. Also precalculate corners, we do it twice now
@@ -717,7 +843,7 @@ int main(int, const char*[]) {
                 Line{topLeft(padded), bottomLeft(padded)},
               };
               for (Uint l = 0; l < arrsize(lines); ++l) {
-                RayCollisionAnswer r = findRayCollision(Line{oldPos, endPoint}, lines[l]);
+                RayCollisionAnswer r = rayCollision(Line{oldPos, endPoint}, lines[l]);
                 if (r.hit && r.t < t) {
                   const float epsilon = 0.001;
                   t = glm::max(0.0f, r.t-epsilon);
@@ -746,9 +872,9 @@ int main(int, const char*[]) {
                 // go on to recalculate wall collisions, this time with the new move
               } else {
                 // We remove this from hittable things and continue towards other collision
+                --iters;
                 hits[hit-hits] = hits[--numHits];
                 pop(Entity*);
-                break;
               }
             } else {
               break;
@@ -759,15 +885,24 @@ int main(int, const char*[]) {
         }
         entity->vel = move/dt;
       }
-      glm::vec2 move = entity->vel * dt;
+      vec2 move = entity->vel * dt;
       const float moveEpsilon = 0.001;
+      Sprite* sprite = get(entity->sprite);
       if (glm::abs(move.x) > moveEpsilon) {
         entity->pos.x += move.x;
-        entity->sprite->screen.x += move.x;
+        sprite->screen.x += move.x;
       }
       if (glm::abs(move.y) > moveEpsilon) {
         entity->pos.y += move.y;
-        entity->sprite->screen.y += move.y;
+        sprite->screen.y += move.y;
+      }
+    }
+
+    // clean up removed entities
+    for (auto iter = iterEntities(); iter; next(&iter)) {
+      SDL_assert(get(iter));
+      if (isset(get(iter), EntityFlag_Removed)) {
+        _remove(get(iter));
       }
     }
 
