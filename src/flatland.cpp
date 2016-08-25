@@ -12,14 +12,36 @@
 #include <stb_rect_pack.h>
 
 typedef unsigned char Byte;
+
+
+void _glOkOrDie(const char* file, int line) {
+  GLenum errorCode = glGetError();
+  if (errorCode != GL_NO_ERROR) {
+    const char* error;
+    switch (errorCode)
+    {
+      case GL_INVALID_ENUM:                  error = "INVALID_ENUM"; break;
+      case GL_INVALID_VALUE:                 error = "INVALID_VALUE"; break;
+      case GL_INVALID_OPERATION:             error = "INVALID_OPERATION"; break;
+      case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW"; break;
+      case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW"; break;
+      case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY"; break;
+      case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
+      default: error = "unknown error";
+    };
+    printf("GL error at %s:%u. Code: %u - %s\n", file, line, errorCode, error);
+    exit(1);
+  }
+}
 #if RELEASE
-#define glOKORDIE 
+#define glOKORDIE
 #else
-#define glOKORDIE {GLenum __flatland_gl_error = glGetError(); if (__flatland_gl_error != GL_NO_ERROR) {printf("GL error at %s:%u: %u\n", __FILE__, __LINE__, __flatland_gl_error); exit(1);}}
+#define glOKORDIE _glOkOrDie(__FILE__, __LINE__)
 #endif
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
 typedef unsigned int Uint;
 typedef unsigned char Byte;
+#define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
 #define local_persist static
 #define MegaBytes(x) ((x)*1024LL*1024LL)
 #define unimplemented printf("unimplemented method %s:%u\n", __FILE__, __LINE__)
@@ -31,8 +53,6 @@ namespace {
 
   using glm::vec2;
   using glm::vec3;
-
-  template<class T> void swap(T* a, T* b) {auto tmp = *a; *a = *b; *b = tmp;}
 
   // Init
   int screen_w = 800;
@@ -82,6 +102,13 @@ namespace {
   }
 
   // Math
+  inline Uint log2(Uint x) {
+    Uint result = 0;
+    while (x >>= 1) {
+      ++result;
+    }
+    return result;
+  }
   inline float frand(float upper) {
     return float(rand())/float(RAND_MAX)*upper;
   }
@@ -99,6 +126,16 @@ namespace {
   }
   inline float lengthSqr(vec2 x) {
     return x.x*x.x + x.y*x.y;
+  }
+  inline Uint32 nextPowerOfTwo(Uint32 x) {
+    x--;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x++;
+    return x;
   }
 
   // Physics
@@ -195,32 +232,122 @@ namespace {
   };
 
   // Camera
-  vec2 viewPosition;
+  vec2 viewPosition = {};
 
   // Sprites
-  const int SPRITES_MAX = 1024;
-  int numSprites = 1;
   struct Sprite {
     union {
       struct {
-        Rect screen, tex;
+        Rect tex, screen;
       };
       struct {
-        GLfloat x,y,w,h, tx,ty,tw,th;
+        GLfloat tx,ty,tw,th, x,y,w,h;
       };
     };
   };
+  inline Rect invalidSpritePos() {
+    return {-100, -100};
+  }
+
+  // Text
+  // Using general allocator for text strings, we wont be using crazy amounts of text so it's fine
+  const Uint CHARACTERS_MAX = 2048; // 2048
+  union CharBucket {
+    struct {
+      union { // this space can be used for the next ptr
+        Rect tex; // for the sprite
+        struct {
+          CharBucket* next;
+          uint size;
+        };
+      };
+      Rect screen; // used to hide sprite when drawing if needed
+    };
+    Sprite sprite;
+  };
+  CharBucket textSprites[CHARACTERS_MAX];
+  CharBucket* freeCharBuckets = 0;
+  struct TextRef {
+    // TODO: squish together these bits?
+    CharBucket* block;
+    uint length;
+  };
+  inline bool isnull(TextRef ref) {return ref.block;}
+  inline Sprite char2sprite(char c) {
+    // TODO: implement
+    return {rectAround({0,0}, 0.03, 0.03), 11, 7, 70, 88};
+  }
+  TextRef addText(const char* text, glm::vec2 pos, float size) {
+    TextRef result = {};
+    SDL_assert(text);
+    if (!text) return result;
+
+    uint len = strlen(text);
+    // find large enough block (first fit)
+    // TODO: best fit?
+    CharBucket* block = freeCharBuckets;
+    while (block && block->size < len) {
+      block = block->next;
+    }
+    if (block) {
+      // advance free pointer
+      if (len < block->size) {
+        // add the space that is left to the freelist
+        CharBucket* newBucket = block + len;
+        newBucket->size = block->size - len;
+        newBucket->next = freeCharBuckets;
+        freeCharBuckets = newBucket;
+      } else {
+        freeCharBuckets = block->next;
+      }
+
+      // fill the sprites
+      CharBucket* bucket = block;
+      const char* c = text;
+      while (*c) {
+        bucket->sprite = char2sprite(*c);
+        ++c; ++bucket;
+      }
+      SDL_assert(c - text == len);
+      result = {block, len};
+    } else {
+      SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "Failed to allocate text block");
+    }
+    return result;
+  }
+  void remove(TextRef ref) {
+    // TODO: do something clever so that we don't have to send the entire ref buffer to the gpu all the time. We could have a dirty queue, or we could have a clever freelist that always fills from the bottom
+    if (!isnull(ref)) {
+      // clear the sprites
+      for (uint i = 0; i < ref.length; ++i) {
+        ref.block[i].screen = invalidSpritePos();
+      }
+      // free block
+      CharBucket* block = ref.block;
+      block->size = ref.length;
+      block->next = freeCharBuckets;
+      freeCharBuckets = block;
+    }
+  }
+  void initText() {
+    freeCharBuckets = textSprites;
+    freeCharBuckets->size = CHARACTERS_MAX;
+    freeCharBuckets->next = 0;
+  }
+
+  const Uint SPRITES_MAX = 1024;
+  Uint numSprites = 1;
   Sprite sprites[SPRITES_MAX];
   union SpriteRefSlot {
     Sprite* sprite;
     SpriteRefSlot* next;
   };
-  typedef SpriteRefSlot SpriteRef;
+  typedef SpriteRefSlot* SpriteRef;
   SpriteRefSlot* freeSpriteRefs = 0;
   uint numSpriteRefs = 0;
   SpriteRefSlot spriteReferences[SPRITES_MAX]; // TODO: use hashmap instead
-  SpriteRefSlot* spriteReferencesInverse[SPRITES_MAX];
-  SpriteRef* addSprite(Sprite s) {
+  SpriteRefSlot* spriteReferenceLocation[SPRITES_MAX];
+  SpriteRef addSprite(Sprite s) {
     SDL_assert(numSprites < SPRITES_MAX);
     if (numSprites == SPRITES_MAX) {
       return 0;
@@ -241,25 +368,31 @@ namespace {
     }
     *sprite = s;
     slot->sprite = sprite;
-    spriteReferencesInverse[numSprites] = slot;
+    spriteReferenceLocation[numSprites] = slot;
     ++numSprites;
     return slot;
   }
-  inline void _remove(SpriteRef* ref) {
+  inline void hardRemove(SpriteRef ref) { // invalidates references to this sprite
     SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
     // swap sprite data with the last one
     uint index = ref->sprite - sprites;
     sprites[index] = sprites[--numSprites];
-    // and update the reference for the last one
-    spriteReferencesInverse[index] = spriteReferencesInverse[numSprites];
-    spriteReferencesInverse[index]->sprite = ref->sprite;
+    // redirect the reference for the last one
+    SpriteRefSlot* slot = spriteReferenceLocation[numSprites];
+    slot->sprite = ref->sprite;
+    // remember the reference position for the last one
+    spriteReferenceLocation[index] = spriteReferenceLocation[numSprites];
     // and add the reference to the freelist
     ref->next = freeSpriteRefs;
     freeSpriteRefs = ref;
   }
-  inline Sprite* get(SpriteRef* ref) {
+  inline Sprite* get(SpriteRef ref) {
     SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
-    return ref->sprite;
+    Sprite* result = 0;
+    if (ref) {
+      result = ref->sprite;
+    }
+    return result;
   }
 
   // Colors
@@ -287,7 +420,7 @@ namespace {
 
     vec2 pos;
     vec2 vel;
-    SpriteRef* sprite;
+    SpriteRef sprite;
     Rect hitBox;
 
     // familiar stuff
@@ -339,7 +472,10 @@ namespace {
   };
   inline Entity* get(EntityRef ref) {
     Entity* result = 0;
-    if (ref.id == ref.entity->id) {
+    if (!ref.entity) {
+      result = NULL;
+    }
+    else if (ref.id == ref.entity->id) {
       result = ref.entity;
     }
     return result;
@@ -351,7 +487,7 @@ namespace {
     SDL_assert(numEntities > 0);
     set(e, EntityFlag_Removed);
   };
-  inline void _remove(Entity* e) {
+  inline void hardRemove(Entity* e) { // invalidates all references to this entity
     SDL_assert(slotOf(e) >= entities && slotOf(e) < entities+ENTITIES_MAX);
     // FIXME: Call this code at the end of the frame
     EntitySlot* slot = slotOf(e);
@@ -359,22 +495,26 @@ namespace {
     freeEntities = slot;
     slot->next = freeEntities;
     if (e->sprite) {
-      _remove(e->sprite);
+      hardRemove(e->sprite);
     }
   };
-  inline void remove(EntityRef ref) { // should warn us about double frees
+  // should warn us about double frees separated by frame. (The same frame is OK)
+  inline void remove(EntityRef ref) { 
     SDL_assert(ref.id == ref.entity->id);
     if (ref.id == ref.entity->id) {
       remove(ref.entity);
     }
   };
-
   // Iterate entities
   typedef EntitySlot* EntityIter;
   void next(EntityIter* iter) {
     SDL_assert((*iter) >= entities && (*iter) < entities+ENTITIES_MAX);
-    do ++(*iter); while (!(*iter)->used && (*iter) != entities+ENTITIES_MAX);
-    if ((*iter) == entities + ENTITIES_MAX) (*iter) = 0;
+    do {
+      ++(*iter);
+    } while (!(*iter)->used && (*iter) != entities+ENTITIES_MAX);
+    if ((*iter) == entities + ENTITIES_MAX) {
+      (*iter) = 0;
+    }
   }
   EntityIter iterEntities() {
     EntitySlot* iter = entities;
@@ -474,7 +614,7 @@ namespace {
 
   GLuint loadTexture(const char* filename) {
     GLuint result;
-    glCreateTextures(GL_TEXTURE_2D, 1, &result);
+    glGenTextures(1, &result);
     glBindTexture(GL_TEXTURE_2D, result);
     glOKORDIE;
 
@@ -505,22 +645,21 @@ namespace {
     FT_Set_Pixel_Sizes(face, 0, height);
 
     stbrp_rect rects[END_CHAR-START_CHAR];
-    stbrp_rect* rect = rects;
     for (uint i = START_CHAR; i < END_CHAR; ++i) {
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
         printf("failed to load char %c\n", i);
         continue;
       }
-      rect->id = i-START_CHAR;
-      rect->w = face->glyph->bitmap.width;
-      rect->h = face->glyph->bitmap.rows;
-      ++rect;
+      Uint id = i-START_CHAR;
+      rects[id].id = id;
+      rects[id].w = face->glyph->bitmap.width;
+      rects[id].h = face->glyph->bitmap.rows;
     }
     stbrp_context c;
     stbrp_init_target(&c, 1024, 1024, (stbrp_node*) stackCurr, 1024);
     stbrp_pack_rects(&c, rects, arrsize(rects));
-    
-    uint maxW = 0, maxH = 0;
+
+    Uint maxW = 0, maxH = 0;
     for (stbrp_rect* r = rects; r < rects+arrsize(rects); ++r) {
       SDL_assert(r->was_packed);
       if (!r->was_packed) {
@@ -530,21 +669,38 @@ namespace {
       maxW = glm::max((uint) r->x + r->w, maxW);
       maxH = glm::max((uint) r->y + r->h, maxW);
     }
+    printf("%u %u\n", maxW, maxH);
+    maxW = nextPowerOfTwo(maxW);
+    maxH = nextPowerOfTwo(maxH);
+    GLint maxTextureSize;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    SDL_assert((Uint) maxTextureSize >= maxW && (Uint) maxTextureSize >= maxH);
+    printf("%u %u %u\n", maxTextureSize, maxW, maxH);
 
-    GLuint tex;
     glActiveTexture(GL_TEXTURE0);
+    glOKORDIE;
+    GLuint tex;
     glGenTextures(1, &tex);
+    glOKORDIE;
     glBindTexture(GL_TEXTURE_2D, tex);
+    glOKORDIE;
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, maxW, maxH, 0, GL_ALPHA, GL_UNSIGNED_BYTE, 0);
+    glOKORDIE;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, maxW, maxH, 0, GL_RED, GL_UNSIGNED_BYTE, 0);
+    glOKORDIE;
     for (uint i = START_CHAR; i < END_CHAR; ++i) {
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
         printf("failed to load char %c at %u\n", i, __LINE__);
         continue;
       }
-      glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x, rect->y, rect->w, rect->h, GL_ALPHA, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
+      stbrp_rect* rect = rects + i-START_CHAR;
+      SDL_assert(rect->x + rect->w <= maxW && rect->y + rect->h <= maxH);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x, rect->y, rect->w, rect->h, GL_RED, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
+      glOKORDIE;
     }
-    return 0;
+    // TODO: Save glyph info (width, offset etc.) for later use
+    // TODO: free freetype data
+    return tex;
   }
 
   void print(glm::mat4 in) {
@@ -564,6 +720,7 @@ namespace {
   }
 
   // Gameplay
+  // Check if a and b has types at and bt, and swaps a and b if needed so that a->type == at and b->type == bt
   inline bool checkTypeAndSwap(Entity** a, Entity** b, EntityType at, EntityType bt) {
     SDL_assert((*a)->type <= (*b)->type);
     if (at > bt) {
@@ -591,14 +748,25 @@ namespace {
 
     return result;
   }
+
+  bool tests() {
+    for (Uint i = 0; i < 10; ++i) {
+      SDL_assert(log2(1 << i) == i);
+    }
+    SDL_assert(sizeof(CharBucket) == sizeof(Sprite));
+    SDL_assert(isnull(addText(0, {}, 30)));
+    return true;
+  }
 };
 
 int main(int, const char*[]) {
   srand(SDL_GetPerformanceCounter());
   SDL_Window* window = initSubSystems();
-  loadFont("assets/monaco.ttf", 48);
+  SDL_assert(tests());
 
   SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
+
+  initText();
 
   // init player
   Entity* player;
@@ -649,34 +817,65 @@ int main(int, const char*[]) {
   GLuint sprites_VAO;
   GLuint sprites_VBO;
   {
-    glGenVertexArrays(1, &sprites_VAO);
+    glGenVertexArrays((GLsizei)1, &sprites_VAO);
+    glOKORDIE;
     glBindVertexArray(sprites_VAO);
+    glOKORDIE;
     glGenBuffers(1, &sprites_VBO);
+    glOKORDIE;
     glBindBuffer(GL_ARRAY_BUFFER, sprites_VBO);
+    glOKORDIE;
     glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(0);
-
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
     glEnableVertexAttribArray(1);
 
     glOKORDIE;
   }
-  
+
+  // create text buffer
+  GLuint textVAO;
+  GLuint textVBO;
+  GLuint fontTexture;
+  {
+    fontTexture = loadFont("assets/monaco.ttf", 48);
+    glOKORDIE;
+    glGenVertexArrays((GLsizei)1, &textVAO);
+    glOKORDIE;
+    glBindVertexArray(textVAO);
+    glOKORDIE;
+    glGenBuffers(1, &textVBO);
+    glOKORDIE;
+    glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+    glOKORDIE;
+    glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), textSprites, GL_DYNAMIC_DRAW);
+    glOKORDIE;
+
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(0);
+
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    glEnableVertexAttribArray(1);
+
+    glOKORDIE;
+  }
+
   // compile shaders and set static uniforms
   GLuint spriteShader;
   GLint viewLocation;
+  GLuint spriteSheet;
   {
     spriteShader = compileShader(sprite_vertex_shader_src, sprite_geometry_shader_src, sprite_fragment_shader_src);
     glUseProgram(spriteShader);
     glOKORDIE;
     // bind the spritesheet
-    GLuint wallTexture = loadTexture("assets/spritesheet.png");
+    spriteSheet = loadTexture("assets/spritesheet.png");
     glOKORDIE;
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, wallTexture);
+    glBindTexture(GL_TEXTURE_2D, spriteSheet);
     glUniform1i(glGetUniformLocation(spriteShader, "uTexture"), 0);
     glOKORDIE;
     // get locations
@@ -902,27 +1101,44 @@ int main(int, const char*[]) {
     for (auto iter = iterEntities(); iter; next(&iter)) {
       SDL_assert(get(iter));
       if (isset(get(iter), EntityFlag_Removed)) {
-        _remove(get(iter));
+        hardRemove(get(iter));
       }
+    }
+
+    // begin draw
+    {
+      glClearColor(1,0,0,1);
+      glClear(GL_COLOR_BUFFER_BIT);
     }
 
     // draw sprites
     {
-      glClearColor(1,0,0,1);
-      glClear(GL_COLOR_BUFFER_BIT);
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, spriteSheet);
       glUseProgram(spriteShader);
       glBindBuffer(GL_ARRAY_BUFFER, sprites_VBO);
       glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
       glUniform2f(viewLocation, viewPosition.x, viewPosition.y);
-      glBindVertexArray(sprites_VAO);
       glDrawArrays(GL_POINTS, 0, numSprites);
       glOKORDIE;
     }
 
+    // draw text
+    {
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, fontTexture);
+      glBindBuffer(GL_ARRAY_BUFFER, textVBO);
+      glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), textSprites, GL_DYNAMIC_DRAW);
+      glUniform2f(viewLocation, 0, 0);
+      glDrawArrays(GL_POINTS, 0, CHARACTERS_MAX);
+    }
+
     SDL_GL_SwapWindow(window);
 
+#ifdef DEBUG
     if (!(loopCount%100)) {
       printf("%f fps\n", 1/dt);
     }
+#endif
   }
 }
