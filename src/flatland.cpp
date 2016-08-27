@@ -235,10 +235,19 @@ namespace {
   vec2 viewPosition = {};
 
   // Sprites
+  // OpenGL layout
   struct Sprite {
     union {
       struct {
-        Rect tex, screen;
+        union {
+          Rect tex;
+          // Allocator information
+          struct {
+            Sprite* next;
+            uint size;
+          };
+        };
+        Rect screen;
       };
       struct {
         GLfloat tx,ty,tw,th, x,y,w,h;
@@ -251,32 +260,22 @@ namespace {
 
   // Text
   // Using general allocator for text strings, we wont be using crazy amounts of text so it's fine
-  const Uint CHARACTERS_MAX = 2048; // 2048
-  union CharBucket {
-    struct {
-      union { // this space can be used for the next ptr
-        Rect tex; // for the sprite
-        struct {
-          CharBucket* next;
-          uint size;
-        };
-      };
-      Rect screen; // used to hide sprite when drawing if needed
-    };
-    Sprite sprite;
+  struct Glyph {
+    Rect dim;
+    float advance;
+    Rect tex;
   };
-  CharBucket textSprites[CHARACTERS_MAX];
-  CharBucket* freeCharBuckets = 0;
+  Glyph glyphs[256];
+  const Uint CHARACTERS_MAX = 2048; // 2048
+  Sprite textSprites[CHARACTERS_MAX];
+  Sprite* freeCharBuckets = 0;
   struct TextRef {
     // TODO: squish together these bits?
-    CharBucket* block;
+    Sprite* block;
     uint length;
   };
   inline bool isnull(TextRef ref) {return ref.block;}
-  inline Sprite char2sprite(char c) {
-    // TODO: implement
-    return {rectAround({0,0}, 0.03, 0.03), 11, 7, 70, 88};
-  }
+  // text can only have one parent, multiple frees are not supported
   TextRef addText(const char* text, glm::vec2 pos, float size) {
     TextRef result = {};
     SDL_assert(text);
@@ -285,7 +284,7 @@ namespace {
     uint len = strlen(text);
     // find large enough block (first fit)
     // TODO: best fit?
-    CharBucket* block = freeCharBuckets;
+    Sprite* block = freeCharBuckets;
     while (block && block->size < len) {
       block = block->next;
     }
@@ -293,7 +292,7 @@ namespace {
       // advance free pointer
       if (len < block->size) {
         // add the space that is left to the freelist
-        CharBucket* newBucket = block + len;
+        Sprite* newBucket = block + len;
         newBucket->size = block->size - len;
         newBucket->next = freeCharBuckets;
         freeCharBuckets = newBucket;
@@ -302,10 +301,11 @@ namespace {
       }
 
       // fill the sprites
-      CharBucket* bucket = block;
+      Sprite* bucket = block;
       const char* c = text;
       while (*c) {
-        bucket->sprite = char2sprite(*c);
+        *bucket = {pos + glyphs[(int) *c].dim};
+        pos.x += glyphs[(int) *c].advance;
         ++c; ++bucket;
       }
       SDL_assert(c - text == len);
@@ -323,7 +323,7 @@ namespace {
         ref.block[i].screen = invalidSpritePos();
       }
       // free block
-      CharBucket* block = ref.block;
+      Sprite* block = ref.block;
       block->size = ref.length;
       block->next = freeCharBuckets;
       freeCharBuckets = block;
@@ -372,7 +372,7 @@ namespace {
     ++numSprites;
     return slot;
   }
-  inline void hardRemove(SpriteRef ref) { // invalidates references to this sprite
+  inline void free(SpriteRef ref) { // invalidates references to this sprite
     SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
     // swap sprite data with the last one
     uint index = ref->sprite - sprites;
@@ -483,19 +483,19 @@ namespace {
   inline EntitySlot* slotOf(Entity* e) {
     return (EntitySlot*) (((Byte*) e) - offsetof(EntitySlot, entity));
   }
+  // safely flags for removal at end of frame
   inline void remove(Entity* e) {
     SDL_assert(numEntities > 0);
     set(e, EntityFlag_Removed);
   };
-  inline void hardRemove(Entity* e) { // invalidates all references to this entity
+  inline void free(Entity* e) { // invalidates all references to this entity
     SDL_assert(slotOf(e) >= entities && slotOf(e) < entities+ENTITIES_MAX);
-    // FIXME: Call this code at the end of the frame
     EntitySlot* slot = slotOf(e);
     slot->used = false;
     freeEntities = slot;
     slot->next = freeEntities;
     if (e->sprite) {
-      hardRemove(e->sprite);
+      free(e->sprite);
     }
   };
   // should warn us about double frees separated by frame. (The same frame is OK)
@@ -634,6 +634,7 @@ namespace {
     return result;
   }
 
+  // Fonts
   const uint START_CHAR = 32;
   const uint END_CHAR = 129;
   GLuint loadFont(const char* filename, uint height) {
@@ -697,12 +698,28 @@ namespace {
       SDL_assert(rect->x + rect->w <= maxW && rect->y + rect->h <= maxH);
       glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x, rect->y, rect->w, rect->h, GL_RED, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
       glOKORDIE;
+
+      auto w = face->glyph->bitmap.width;
+      auto h = face->glyph->bitmap.width;
+      glyphs[i] = Glyph{
+        Rect{
+          (face->glyph->bitmap_left + w/2.0f)/height,
+          (face->glyph->bitmap_top + h/2.0f)/height,
+          (float) w/height,
+          (float) h/height
+        },
+        (float) face->glyph->advance.x/height,
+        {(float) rect->x, (float) rect->y, (float) rect->w, (float) rect->h},
+      };
     }
     // TODO: Save glyph info (width, offset etc.) for later use
     // TODO: free freetype data
+    FT_Done_Face(face);
+    FT_Done_FreeType(ft);
     return tex;
   }
 
+  // Prints
   void print(glm::mat4 in) {
     const float* mat = glm::value_ptr(in);
     for (Uint i = 0; i < 4; ++i) {
@@ -753,8 +770,8 @@ namespace {
     for (Uint i = 0; i < 10; ++i) {
       SDL_assert(log2(1 << i) == i);
     }
-    SDL_assert(sizeof(CharBucket) == sizeof(Sprite));
-    SDL_assert(isnull(addText(0, {}, 30)));
+    struct X {Rect a,b;};
+    SDL_assert(sizeof(X) == sizeof(Sprite));
     return true;
   }
 };
@@ -1101,7 +1118,7 @@ int main(int, const char*[]) {
     for (auto iter = iterEntities(); iter; next(&iter)) {
       SDL_assert(get(iter));
       if (isset(get(iter), EntityFlag_Removed)) {
-        hardRemove(get(iter));
+        free(get(iter));
       }
     }
 
@@ -1124,6 +1141,7 @@ int main(int, const char*[]) {
     }
 
     // draw text
+    /*
     {
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, fontTexture);
@@ -1132,6 +1150,7 @@ int main(int, const char*[]) {
       glUniform2f(viewLocation, 0, 0);
       glDrawArrays(GL_POINTS, 0, CHARACTERS_MAX);
     }
+  */
 
     SDL_GL_SwapWindow(window);
 
