@@ -51,7 +51,7 @@ typedef unsigned char Byte;
 
 namespace {
 
-# include "shaders.cpp"
+  #include "shaders.cpp"
 
   using glm::vec2;
   using glm::vec3;
@@ -194,7 +194,6 @@ namespace {
   inline bool collision(vec2 p, Rect r) {
     return collision(r, p);
   }
-
   struct Line {vec2 a,b;};
   inline vec2 line2vector(Line l) {
     return l.b - l.a;
@@ -268,14 +267,16 @@ namespace {
 
   // Text
   // Using general allocator for text strings, we wont be using crazy amounts of text so it's fine
-  // TODO: do something clever so that we don't have to send the entire ref buffer to the gpu all the time. We could have a dirty queue, or we could have a clever freelist that always fills from the bottom
+  // TODO: generate closest-point texture to save space and enable shadows and glows and stuff
+  // TODO: if we run out of memory, maybe the newest text should get priority, and the old references should be invalidated?
   struct Glyph {
     Rect dim;
     float advance;
     Rect tex;
   };
   Glyph glyphs[256];
-  const Uint CHARACTERS_MAX = 2048;
+  const Uint CHARACTERS_MAX = 1024;
+  bool textDirty = false;
   Sprite textSprites[CHARACTERS_MAX];
   Sprite* freeChars;
   Sprite* textSpritesMax = textSprites;
@@ -286,7 +287,7 @@ namespace {
   };
   inline bool isnull(TextRef ref) {return !ref.block;}
   // text can only have one parent, multiple frees are not supported
-  TextRef addText(const char* text, glm::vec2 pos, float scale, bool center = false) {
+  TextRef addText(const char* text, vec2 pos, float scale, bool center = false) {
     TextRef result = {};
     SDL_assert(text);
     if (!text) return result;
@@ -300,6 +301,9 @@ namespace {
     }
     if (*p) {
       Sprite* block = *p;
+
+      // set dirty flag
+      textDirty = true;
 
       // free space
       if (len < (*p)->size) {
@@ -407,6 +411,9 @@ namespace {
       // update max
       if (textSpritesMax == ref.block+ref.size) {
         textSpritesMax = leftFree;
+      } else {
+        // if we popped data, then we don't have to mark as dirty, we only draw upwards
+        textDirty = true;
       }
       #ifdef DEBUG
         printf(" end is %li\n", textSpritesMax - textSprites);
@@ -519,7 +526,6 @@ namespace {
     // player stuff
     Uint health;
   };
-
   inline bool isset(Entity* e, EntityFlag flag) {
     return e->flags & flag;
   }
@@ -529,7 +535,6 @@ namespace {
   inline void unset(Entity* e, EntityFlag flag) {
     e->flags &= ~flag;
   }
-
   struct EntitySlot {
     bool used;
     union {
@@ -542,7 +547,6 @@ namespace {
   EntitySlot* freeEntities = 0;
   Uint entityId = 0;
   EntitySlot entities[ENTITIES_MAX] = {};
-
   Entity* addEntity() {
     EntitySlot* slot;
     if (freeEntities) {
@@ -700,7 +704,6 @@ namespace {
     glOKORDIE;
     return shaderProgram;
   }
-
   GLuint loadTexture(const char* filename) {
     GLuint result;
     glGenTextures(1, &result);
@@ -1084,23 +1087,6 @@ int main(int, const char*[]) {
 
           // input movement
           entity->vel.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
-          // entity->vel.y += ACCELLERATION*dt*isDown[KEY_UP] - ACCELLERATION*dt*isDown[KEY_DOWN];
-          /*
-          if (wasPressed[KEY_A] && numWalls > 0) {
-            // get closest wall and move towards it
-            vec2 p = center(*walls);
-            float minD = glm::distance(entity->pos, p);
-            for (int i = 1; i < numWalls; ++i) {
-              auto d = glm::distance(entity->pos, center(walls[i]));
-              if (d < minD) {
-                minD = d;
-                p = center(walls[i]);
-              }
-            }
-            const float FORCE = 3;
-            entity->vel = glm::normalize(p - entity->pos) * FORCE;
-          }
-          */
           if (wasPressed[KEY_UP]) {
             entity->vel.y = JUMPPOWER;
           }
@@ -1289,10 +1275,14 @@ int main(int, const char*[]) {
 
       glBindVertexArray(textVAO);
       glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-      glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(Sprite), textSprites);
+      if (textDirty) {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(Sprite), textSprites);
+      }
       glUniform2f(viewLocation, 0, 0);
       glDrawArrays(GL_POINTS, 0, (textSpritesMax - textSprites));
       glOKORDIE;
+
+      textDirty = false;
     }
 
     SDL_GL_SwapWindow(window);
