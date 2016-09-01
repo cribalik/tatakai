@@ -11,6 +11,8 @@
 #define STB_RECT_PACK_IMPLEMENTATION 1
 #include <stb_rect_pack.h>
 
+#define DEBUG
+
 typedef unsigned char Byte;
 
 
@@ -83,6 +85,8 @@ namespace {
     glOKORDIE;
 
     glViewport(0, 0, screen_w, screen_h);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     if (FT_Init_FreeType(&ft)) {
       puts("Failed to init freetype\n");
@@ -102,6 +106,7 @@ namespace {
   }
 
   // Math
+  #define MAX(a, b) ((a) < (b) ? (b) : (a))
   inline Uint log2(Uint x) {
     Uint result = 0;
     while (x >>= 1) {
@@ -137,6 +142,7 @@ namespace {
     x++;
     return x;
   }
+  #define multipleOf(a, b) (!((a)%(b)))
 
   // Physics
   struct Rect {
@@ -147,6 +153,9 @@ namespace {
   }
   inline Rect operator+(vec2 v, Rect r) {
     return r + v;
+  }
+  inline Rect operator*(Rect r, float m) {
+    return Rect{r.x, r.y, r.w * m, r.h * m};
   }
   inline Rect rectAround(vec2 pos, float w, float h) {
     return {pos.x - w/2, pos.y - h/2, w, h};
@@ -239,18 +248,17 @@ namespace {
   struct Sprite {
     union {
       struct {
-        union {
-          Rect tex;
-          // Allocator information
-          struct {
-            Sprite* next;
-            uint size;
-          };
-        };
-        Rect screen;
+        Rect screen, tex;
       };
       struct {
-        GLfloat tx,ty,tw,th, x,y,w,h;
+        Rect _; // texture
+        struct { // Allocator information
+          Sprite* next;
+          uint size;
+        };
+      };
+      struct {
+        GLfloat x,y,w,h, tx,ty,tw,th;
       };
     };
   };
@@ -260,23 +268,25 @@ namespace {
 
   // Text
   // Using general allocator for text strings, we wont be using crazy amounts of text so it's fine
+  // TODO: do something clever so that we don't have to send the entire ref buffer to the gpu all the time. We could have a dirty queue, or we could have a clever freelist that always fills from the bottom
   struct Glyph {
     Rect dim;
     float advance;
     Rect tex;
   };
   Glyph glyphs[256];
-  const Uint CHARACTERS_MAX = 2048; // 2048
+  const Uint CHARACTERS_MAX = 2048;
   Sprite textSprites[CHARACTERS_MAX];
-  Sprite* freeCharBuckets = 0;
+  Sprite* freeChars;
+  Sprite* textSpritesMax = textSprites;
   struct TextRef {
     // TODO: squish together these bits?
     Sprite* block;
-    uint length;
+    uint size;
   };
-  inline bool isnull(TextRef ref) {return ref.block;}
+  inline bool isnull(TextRef ref) {return !ref.block;}
   // text can only have one parent, multiple frees are not supported
-  TextRef addText(const char* text, glm::vec2 pos, float size) {
+  TextRef addText(const char* text, glm::vec2 pos, float scale, bool center = false) {
     TextRef result = {};
     SDL_assert(text);
     if (!text) return result;
@@ -284,31 +294,59 @@ namespace {
     uint len = strlen(text);
     // find large enough block (first fit)
     // TODO: best fit?
-    Sprite* block = freeCharBuckets;
-    while (block && block->size < len) {
-      block = block->next;
+    Sprite** p = &freeChars;
+    while (*p && (*p)->size < len) {
+      p = &(*p)->next;
     }
-    if (block) {
-      // advance free pointer
-      if (len < block->size) {
-        // add the space that is left to the freelist
-        Sprite* newBucket = block + len;
-        newBucket->size = block->size - len;
-        newBucket->next = freeCharBuckets;
-        freeCharBuckets = newBucket;
+    if (*p) {
+      Sprite* block = *p;
+
+      // free space
+      if (len < (*p)->size) {
+        // add the space that is left over
+        Sprite* newBucket = *p + len;
+        newBucket->size = (*p)->size - len;
+        newBucket->next = (*p)->next;
+        *p = newBucket;
       } else {
-        freeCharBuckets = block->next;
+        // skip to next block
+        *p = (*p)->next;
+      }
+
+      #ifdef DEBUG
+        printf("Allocating text block at %li of size %u", block - textSprites, len);
+      #endif
+
+      // align to center
+      if (center) {
+        float width = 0.0f;
+        for (const char* c = text; *c; ++c) {
+          width += glyphs[(int) *c].advance * scale;
+        }
+        pos.x -= width/2;
       }
 
       // fill the sprites
       Sprite* bucket = block;
-      const char* c = text;
-      while (*c) {
-        *bucket = {pos + glyphs[(int) *c].dim};
-        pos.x += glyphs[(int) *c].advance;
-        ++c; ++bucket;
+      for (const char* c = text; *c; ++c, ++bucket) {
+        uint i = *c;
+        *bucket = Sprite{
+          Rect{
+            pos.x + (glyphs[i].dim.x - glyphs[i].dim.w/2) * scale,
+            pos.y,
+            glyphs[i].dim.w * scale,
+            glyphs[i].dim.h * scale,
+          },
+          glyphs[i].tex
+        };
+        pos.x += glyphs[i].advance * scale;
       }
-      SDL_assert(c - text == len);
+
+      // did this block increase the max?
+      textSpritesMax = MAX(textSpritesMax, block+len);
+      #ifdef DEBUG
+        printf(" end is %li\n", textSpritesMax - textSprites);
+      #endif
       result = {block, len};
     } else {
       SDL_LogWarn(SDL_LOG_CATEGORY_VIDEO, "Failed to allocate text block");
@@ -316,27 +354,79 @@ namespace {
     return result;
   }
   void remove(TextRef ref) {
-    // TODO: do something clever so that we don't have to send the entire ref buffer to the gpu all the time. We could have a dirty queue, or we could have a clever freelist that always fills from the bottom
     if (!isnull(ref)) {
-      // clear the sprites
-      for (uint i = 0; i < ref.length; ++i) {
+      #ifdef DEBUG
+        printf("Removed text block at %li of size %u", ref.block - textSprites, ref.size);
+      #endif
+      // hide the removed sprites
+      for (uint i = 0; i < ref.size; ++i) {
         ref.block[i].screen = invalidSpritePos();
       }
       // free block
-      Sprite* block = ref.block;
-      block->size = ref.length;
-      block->next = freeCharBuckets;
-      freeCharBuckets = block;
+      // we want the freelist to be ordered, find the free block before this block
+      ref.block->size = ref.size;
+      ref.block->next = 0;
+      Sprite* leftFree = ref.block;
+      if (!freeChars) {
+        freeChars = ref.block;
+      } else if (freeChars > ref.block) {
+        if (freeChars == ref.block + ref.size) {
+          // merge
+          ref.block->size += freeChars->size;
+        }
+        else {
+          // append
+          ref.block->next = freeChars;
+        }
+        freeChars = ref.block;
+      } else {
+        // Find the block before the freed block
+        Sprite* l = freeChars;
+        Sprite* m = ref.block;
+        while (l->next && l->next < m) {
+          l = l->next;
+        }
+        Sprite* r = l->next;
+        // block is to the left, block->next is to the right of the freed block
+        l->next = m;
+        m->next = r;
+        SDL_assert((l < m) && (!r || m < r));
+        // merge right
+        if (r && m + m->size == r) {
+          m->size += r->size;
+          m->next = r->next;
+        }
+        // merge left
+        if (l + l->size == m) {
+          l->size += m->size;
+          l->next = m->next;
+          leftFree = l;
+        }
+      }
+
+      // update max
+      if (textSpritesMax == ref.block+ref.size) {
+        textSpritesMax = leftFree;
+      }
+      #ifdef DEBUG
+        printf(" end is %li\n", textSpritesMax - textSprites);
+      #endif
     }
   }
-  void initText() {
-    freeCharBuckets = textSprites;
-    freeCharBuckets->size = CHARACTERS_MAX;
-    freeCharBuckets->next = 0;
+  GLuint loadFont(const char* filename, uint height);
+  GLuint initText() {
+    GLuint result = loadFont("assets/monaco.ttf", 48);
+    for (uint i = 0; i < CHARACTERS_MAX; ++i) {
+      textSprites[i].screen = invalidSpritePos();
+    }
+    freeChars = textSprites;
+    freeChars->size = CHARACTERS_MAX;
+    freeChars->next = 0;
+    return result;
   }
 
   const Uint SPRITES_MAX = 1024;
-  Uint numSprites = 1;
+  Uint numSprites = 0;
   Sprite sprites[SPRITES_MAX];
   union SpriteRefSlot {
     Sprite* sprite;
@@ -345,7 +435,7 @@ namespace {
   typedef SpriteRefSlot* SpriteRef;
   SpriteRefSlot* freeSpriteRefs = 0;
   uint numSpriteRefs = 0;
-  SpriteRefSlot spriteReferences[SPRITES_MAX]; // TODO: use hashmap instead
+  SpriteRefSlot spriteReferences[SPRITES_MAX]; // TODO: use hashmap instead?
   SpriteRefSlot* spriteReferenceLocation[SPRITES_MAX];
   SpriteRef addSprite(Sprite s) {
     SDL_assert(numSprites < SPRITES_MAX);
@@ -533,9 +623,8 @@ namespace {
   Byte* stackCurr = stack;
   inline void* _push(Uint size) {
     SDL_assert(stackCurr + size < stack + STACK_MAX);
-    Byte* p = stackCurr;
     stackCurr += size;
-    return p;
+    return stackCurr-size;
   }
   inline void _pop(Uint size) {
     SDL_assert(stackCurr - size >= stack);
@@ -544,10 +633,10 @@ namespace {
   void* getCurrStackPos() {
     return stackCurr;
   }
-#define push(type) _push(sizeof(type))
-#define pushArr(type, count) _push(sizeof(type)*count)
-#define pop(type) _pop(sizeof(type))
-#define popArr(type, count) _pop(sizeof(type)*count)
+  #define push(type) _push(sizeof(type))
+  #define pushArr(type, count) _push(sizeof(type)*count)
+  #define pop(type) _pop(sizeof(type))
+  #define popArr(type, count) _pop(sizeof(type)*count)
 
   // openGL
   GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
@@ -635,9 +724,11 @@ namespace {
   }
 
   // Fonts
-  const uint START_CHAR = 32;
-  const uint END_CHAR = 129;
+  const char START_CHAR = 32;
+  const char END_CHAR = 127;
   GLuint loadFont(const char* filename, uint height) {
+
+    // load font file
     FT_Face face;
     if (FT_New_Face(ft, filename, 0, &face)) {
       printf("Failed to load font at %s\n", filename);
@@ -645,6 +736,8 @@ namespace {
     }
     FT_Set_Pixel_Sizes(face, 0, height);
 
+    // pack glyphs
+    const int pad = 2;
     stbrp_rect rects[END_CHAR-START_CHAR];
     for (uint i = START_CHAR; i < END_CHAR; ++i) {
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
@@ -653,13 +746,14 @@ namespace {
       }
       Uint id = i-START_CHAR;
       rects[id].id = id;
-      rects[id].w = face->glyph->bitmap.width;
-      rects[id].h = face->glyph->bitmap.rows;
+      rects[id].w = face->glyph->bitmap.width + 2*pad; // pad with 2 pixels on each side
+      rects[id].h = face->glyph->bitmap.rows + 2*pad;
     }
     stbrp_context c;
     stbrp_init_target(&c, 1024, 1024, (stbrp_node*) stackCurr, 1024);
     stbrp_pack_rects(&c, rects, arrsize(rects));
 
+    // get the max width and height
     Uint maxW = 0, maxH = 0;
     for (stbrp_rect* r = rects; r < rects+arrsize(rects); ++r) {
       SDL_assert(r->was_packed);
@@ -670,14 +764,19 @@ namespace {
       maxW = glm::max((uint) r->x + r->w, maxW);
       maxH = glm::max((uint) r->y + r->h, maxW);
     }
-    printf("%u %u\n", maxW, maxH);
     maxW = nextPowerOfTwo(maxW);
     maxH = nextPowerOfTwo(maxH);
+    printf("Font texture dimensions: %u %u\n", maxW, maxH);
+    maxW = 1024;
+    maxH = 1024;
+
+    // check if opengl support that size of texture
     GLint maxTextureSize;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
     SDL_assert((Uint) maxTextureSize >= maxW && (Uint) maxTextureSize >= maxH);
     printf("%u %u %u\n", maxTextureSize, maxW, maxH);
 
+    // create texture
     glActiveTexture(GL_TEXTURE0);
     glOKORDIE;
     GLuint tex;
@@ -689,31 +788,55 @@ namespace {
     glOKORDIE;
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, maxW, maxH, 0, GL_RED, GL_UNSIGNED_BYTE, 0);
     glOKORDIE;
-    for (uint i = START_CHAR; i < END_CHAR; ++i) {
+
+    // load glyphs into texture
+    for (char i = START_CHAR; i < END_CHAR; ++i) {
+      printf("%c ", i);
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
         printf("failed to load char %c at %u\n", i, __LINE__);
         continue;
       }
+
+      #ifdef DEBUG
+        unsigned char* c = face->glyph->bitmap.buffer;
+        for (uint i = 0; i < face->glyph->bitmap.width; ++i) {
+          auto p = c;
+          for (uint j = 0; j < face->glyph->bitmap.rows; ++j) {
+            printf("%u ", *p);
+            ++p;
+          }
+          c += face->glyph->bitmap.pitch;
+        }
+      #endif
+
       stbrp_rect* rect = rects + i-START_CHAR;
       SDL_assert(rect->x + rect->w <= maxW && rect->y + rect->h <= maxH);
-      glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x, rect->y, rect->w, rect->h, GL_RED, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
+      SDL_assert(rect->id == (int) (i-START_CHAR));
+      SDL_assert((rect->w - 2*pad) * (rect->h - 2*pad) == (int) (face->glyph->bitmap.rows * face->glyph->bitmap.width));
+      glTexSubImage2D(GL_TEXTURE_2D, 0, rect->x+pad, rect->y+pad, rect->w - 2*pad, rect->h - 2*pad, GL_RED, GL_UNSIGNED_BYTE, face->glyph->bitmap.buffer);
       glOKORDIE;
 
+      // save glyph offsets
       auto w = face->glyph->bitmap.width;
-      auto h = face->glyph->bitmap.width;
-      glyphs[i] = Glyph{
+      auto h = face->glyph->bitmap.rows;
+      float fheight = (float) height;
+      printf("bx: %i by: %i advx: %li advy: %li\n", face->glyph->bitmap_left, face->glyph->bitmap_top, face->glyph->advance.x, face->glyph->advance.y);
+      glyphs[(int) i] = Glyph{
         Rect{
-          (face->glyph->bitmap_left + w/2.0f)/height,
-          (face->glyph->bitmap_top + h/2.0f)/height,
-          (float) w/height,
-          (float) h/height
+          (float(face->glyph->bitmap_left) + w/2.0f)/fheight,
+          (float(face->glyph->bitmap_top) + h/2.0f)/fheight,
+          (float) w/fheight,
+          (float) h/fheight
         },
-        (float) face->glyph->advance.x/height,
-        {(float) rect->x, (float) rect->y, (float) rect->w, (float) rect->h},
+        float(face->glyph->advance.x)/fheight/64.0f,
+        Rect{(float) rect->x, (float) rect->y, (float) rect->w, (float) rect->h},
       };
     }
-    // TODO: Save glyph info (width, offset etc.) for later use
-    // TODO: free freetype data
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
     FT_Done_Face(face);
     FT_Done_FreeType(ft);
     return tex;
@@ -777,13 +900,15 @@ namespace {
 };
 
 int main(int, const char*[]) {
-  srand(SDL_GetPerformanceCounter());
+  #ifndef DEBUG
+    srand(SDL_GetPerformanceCounter());
+  #endif
   SDL_Window* window = initSubSystems();
   SDL_assert(tests());
 
   SDL_assert(sizeof(Sprite) == 8*sizeof(GLfloat));
 
-  initText();
+  GLuint fontTexture = initText();
 
   // init player
   Entity* player;
@@ -792,7 +917,7 @@ int main(int, const char*[]) {
     player = addEntity();
     player->pos = {};
     // TODO: get spritesheet info from external source
-    player->sprite = addSprite({rectAround(player->pos, w, h), 11, 7, 70, 88});
+    player->sprite = addSprite({rectAround(player->pos, w, h), Rect{11, 7, 70, 88}});
     player->type = EntityType_Player;
     player->hitBox = rectAround({}, w, h);
     player->health = 10;
@@ -823,31 +948,31 @@ int main(int, const char*[]) {
       wall->sprite = addSprite({walls[i], 0, 282, 142, 142});
       wall->hitBox = rectAround({}, walls[i].w, walls[i].h);
       wall->type = EntityType_Wall;
-      print("hitbox", wall->hitBox);
-      print("pos", wall->pos);
       putchar('\n');
     }
   }
 
+  // init some text
+  {
+    addText("Hello world 1234567890", {}, 0.15, true);
+    // textSprites[0] = {rectAround({0, 0}, 2, 2), glyphs['m'].tex};
+    // textSprites[1] = {rectAround({0, 0}, 2, 2), Rect{0, 0, 1024, 1024}};
+  }
 
   // create sprite buffer
-  GLuint sprites_VAO;
-  GLuint sprites_VBO;
+  GLuint spritesVAO;
+  GLuint spritesVBO;
   {
-    glGenVertexArrays((GLsizei)1, &sprites_VAO);
-    glOKORDIE;
-    glBindVertexArray(sprites_VAO);
-    glOKORDIE;
-    glGenBuffers(1, &sprites_VBO);
-    glOKORDIE;
-    glBindBuffer(GL_ARRAY_BUFFER, sprites_VBO);
-    glOKORDIE;
+    glGenVertexArrays(1, &spritesVAO);
+    glBindVertexArray(spritesVAO);
+    glGenBuffers(1, &spritesVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, spritesVBO);
     glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
 
     glOKORDIE;
@@ -856,27 +981,18 @@ int main(int, const char*[]) {
   // create text buffer
   GLuint textVAO;
   GLuint textVBO;
-  GLuint fontTexture;
   {
-    fontTexture = loadFont("assets/monaco.ttf", 48);
-    glOKORDIE;
-    glGenVertexArrays((GLsizei)1, &textVAO);
-    glOKORDIE;
+    glGenVertexArrays(1, &textVAO);
     glBindVertexArray(textVAO);
-    glOKORDIE;
     glGenBuffers(1, &textVBO);
-    glOKORDIE;
     glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-    glOKORDIE;
-    glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), textSprites, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), 0, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
     glEnableVertexAttribArray(0);
-
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
-
     glOKORDIE;
   }
 
@@ -884,6 +1000,7 @@ int main(int, const char*[]) {
   GLuint spriteShader;
   GLint viewLocation;
   GLuint spriteSheet;
+  GLuint textShader;
   {
     spriteShader = compileShader(sprite_vertex_shader_src, sprite_geometry_shader_src, sprite_fragment_shader_src);
     glUseProgram(spriteShader);
@@ -900,16 +1017,18 @@ int main(int, const char*[]) {
     GLuint ambientLightLocation = glGetUniformLocation(spriteShader, "uAmbientLight");
     glUniform3f(ambientLightLocation, 1, 1, 1);
     glOKORDIE;
+    textShader = compileShader(text_vertex_shader_src, text_geometry_shader_src, text_fragment_shader_src);
   }
 
-  // set lights
-  SDL_SetRelativeMouseMode(SDL_TRUE);
-  SDL_GetRelativeMouseState(0, 0);
+  // SDL_SetRelativeMouseMode(SDL_TRUE);
+  // SDL_GetRelativeMouseState(0, 0);
 
+  // main loop
   Timer loopTime = startTimer();
   int loopCount = 0;
   while (true)
   {
+
     ++loopCount;
     float dt = getDuration(loopTime);
     loopTime = startTimer();
@@ -1070,17 +1189,18 @@ int main(int, const char*[]) {
               SDL_assert(t >= 0);
             }
             if (hit) {
-              printf("Hit!\n");
-              printf("%u %u\n", (Uint) entity->type, (Uint) entity->type);
-              print("moveBox", moveBox);
-              print("hitBox", entity->hitBox);
-              print("move", move);
-              printf("t: %f\n", t);
+              #if 0
+                printf("Hit!\n");
+                printf("%u %u\n", (Uint) entity->type, (Uint) entity->type);
+                print("moveBox", moveBox);
+                print("hitBox", entity->hitBox);
+                print("move", move);
+                printf("t: %f\n", t);
+              #endif
               Entity* hitEntity = *hit;
               bool passThrough = processCollision(entity, hitEntity, oldPos, endPoint, collision(hitEntity->hitBox + hitEntity->pos, endPoint));
               if (!passThrough) {
                 auto glide = dot(move, closestWall)*(1.0f-t) * closestWall / lengthSqr(closestWall);
-                print("glide", glide);
                 // move up to wall
                 move *= glm::max(0.0f, t);
                 // and add glide
@@ -1114,6 +1234,23 @@ int main(int, const char*[]) {
       }
     }
 
+    // randomly add some text
+    local_persist TextRef texts[16];
+    local_persist uint numTexts = 0;
+    if (multipleOf(rand(), 30) && numTexts < 16) {
+      // add text
+      char* text = (char*) stackCurr;
+      int n = sprintf(text, "It's over %u!", rand());
+      pushArr(int, n);
+      texts[numTexts++] = addText(text, {frand(-1, 1), frand(-1, 1)}, 0.05, true);
+      popArr(int, n);
+    } else if (numTexts == 16 || (multipleOf(rand(), 20) && numTexts > 0)) {
+      // remove text
+      uint i = uint(rand())%numTexts;
+      remove(texts[i]);
+      texts[i] = texts[--numTexts];
+    }
+
     // clean up removed entities
     for (auto iter = iterEntities(); iter; next(&iter)) {
       SDL_assert(get(iter));
@@ -1130,10 +1267,13 @@ int main(int, const char*[]) {
 
     // draw sprites
     {
+      glUseProgram(spriteShader);
+
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, spriteSheet);
-      glUseProgram(spriteShader);
-      glBindBuffer(GL_ARRAY_BUFFER, sprites_VBO);
+
+      glBindVertexArray(spritesVAO);
+      glBindBuffer(GL_ARRAY_BUFFER, spritesVBO);
       glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
       glUniform2f(viewLocation, viewPosition.x, viewPosition.y);
       glDrawArrays(GL_POINTS, 0, numSprites);
@@ -1141,23 +1281,26 @@ int main(int, const char*[]) {
     }
 
     // draw text
-    /*
     {
+      glUseProgram(textShader);
+
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, fontTexture);
+
+      glBindVertexArray(textVAO);
       glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-      glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), textSprites, GL_DYNAMIC_DRAW);
+      glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(Sprite), textSprites);
       glUniform2f(viewLocation, 0, 0);
-      glDrawArrays(GL_POINTS, 0, CHARACTERS_MAX);
+      glDrawArrays(GL_POINTS, 0, (textSpritesMax - textSprites));
+      glOKORDIE;
     }
-  */
 
     SDL_GL_SwapWindow(window);
 
-#ifdef DEBUG
-    if (!(loopCount%100)) {
-      printf("%f fps\n", 1/dt);
-    }
-#endif
+    #ifdef DEBUG
+      if (!(loopCount%100)) {
+        printf("%f fps\n", 1/dt);
+      }
+    #endif
   }
 }

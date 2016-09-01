@@ -16,7 +16,6 @@ const char* sprite_vertex_shader_src = R"(
     gl_Position = pos + vec4(uView, 0, 0);
     myOutput.texCoord = texCoord;
   }
-
 )";
 
 const char* sprite_geometry_shader_src = R"(
@@ -75,9 +74,29 @@ const char* sprite_fragment_shader_src = R"(
       color = vec4(uAmbientLight, 1) * texColor;
     }
   }
-
 )";
 
+const char* text_vertex_shader_src = sprite_vertex_shader_src;
+const char* text_geometry_shader_src = sprite_geometry_shader_src;
+const char* text_fragment_shader_src = R"(
+
+  #version 330 core
+
+  in vec2 texCoord;
+
+  uniform sampler2D uTexture;
+  uniform vec3 uAmbientLight;
+
+  out vec4 color;
+
+  void main()
+  {
+    float alpha = texture(uTexture, vec2(texCoord.x/1024, texCoord.y/1024)).r;
+    color = vec4(1, 1, 1, alpha);
+  }
+)";
+
+#if 0
 const char* particle_vertex_shader_src = R"(
 
   #version 330 core
@@ -99,9 +118,7 @@ const char* particle_vertex_shader_src = R"(
     gl_PointSize = model.z;
     vTexCoord = texCoord;
   }
-
 )";
-
 
 const char* point_light_fragment_shader_src = R"(
   #version 330 core
@@ -121,10 +138,8 @@ const char* point_light_fragment_shader_src = R"(
     float multiplier = 1/(constant + linear*diff + quadratic*diff*diff);
     vec4 color = vec4(color, multiplier);
   }
-
 )";
 
-#if 0
 const char* lightShader = R"(
 
   #version 330 core

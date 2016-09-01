@@ -1,0 +1,670 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"sprite",
+				"sprite_vertex_shader_src"
+			],
+			[
+				"invalid",
+				"invalidSpritePos"
+			],
+			[
+				"Csfb",
+				"CsfbUdr"
+			],
+			[
+				"fallba",
+				"fallbackSuccess"
+			],
+			[
+				"enodeb",
+				"enodeb_id"
+			],
+			[
+				"enoded",
+				"enodeb_id"
+			],
+			[
+				"session",
+				"sessionStarted"
+			],
+			[
+				"alertimt",
+				"alertingTime"
+			],
+			[
+				"startdi",
+				"START_DIFF"
+			],
+			[
+				"aletri",
+				"alertingTime"
+			],
+			[
+				"WAIT_FO",
+				"WAIT_FOR_CALL_END"
+			],
+			[
+				"wait",
+				"WAIT_FOR_CALL_END"
+			],
+			[
+				"WAIT",
+				"WAIT_FOR_CALL_END"
+			],
+			[
+				"RAU",
+				"LU_RAU"
+			],
+			[
+				"S1AP",
+				"S1AP_CAUSE"
+			],
+			[
+				"sgsa",
+				"sgsapCause"
+			],
+			[
+				"SGSAP",
+				"SGSAP_PAGING"
+			],
+			[
+				"SGS",
+				"SGSAP_PAGING"
+			],
+			[
+				"WAITIN",
+				"WAITING_FOR_RAU"
+			],
+			[
+				"s1ap",
+				"s1apCause"
+			],
+			[
+				"alert",
+				"alerting_time"
+			],
+			[
+				"WAITTI",
+				"WAIT_TIME_AFTER_LU"
+			],
+			[
+				"WAI",
+				"WAIT_AFTER_S1AP"
+			],
+			[
+				"DEFAUL",
+				"DEFAULT_TIMEOUTPASS_DURATION_MULTIPLIER"
+			],
+			[
+				"checkpoin",
+				"checkpointInterval"
+			],
+			[
+				"checkp",
+				"checkpointInterval"
+			],
+			[
+				"check",
+				"checkpointInterval"
+			],
+			[
+				"Befo",
+				"BeforeAndAfter"
+			],
+			[
+				"Befoer",
+				"BeforeAndAfterAll"
+			]
+		]
+	},
+	"buffers":
+	[
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 192.0,
+		"last_filter": "subli",
+		"selected_items":
+		[
+			[
+				"subli",
+				"SublimeGDB: Stop Debugging"
+			],
+			[
+				"JSO",
+				"Set Syntax: JSON"
+			],
+			[
+				"json",
+				"Set Syntax: JSON"
+			],
+			[
+				"gdb",
+				"SublimeGDB: Start Debugging"
+			],
+			[
+				"wrap",
+				"Word Wrap: Toggle"
+			],
+			[
+				"wrpa",
+				"Word Wrap: Toggle"
+			],
+			[
+				"syntax c++",
+				"Set Syntax: C++"
+			],
+			[
+				":w",
+				":w - Save"
+			],
+			[
+				"build",
+				"Build: Cancel"
+			],
+			[
+				"synta",
+				"Set Syntax: Markdown"
+			],
+			[
+				"fold",
+				"Code Folding: Fold Tag Attributes"
+			],
+			[
+				":q",
+				"Set Syntax: SQL"
+			]
+		],
+		"width": 449.0
+	},
+	"console":
+	{
+		"height": 383.0,
+		"history":
+		[
+			"r",
+			"view.settings().get(\"tab_size\")",
+			"view.settings().get(\"sublimegdb_workingdir\")",
+			"view.settings().get(\"tab_size\")",
+			"view.settings().get(\"sublimegdb_commandline\")",
+			"view.settings().get(\"sublimegdb_workingdir\")",
+			"view.settings().get(\"sublimegdb_commandline\")",
+			"view.settings().get(\"sublimegdb_workingdir\")",
+			"view.settings().get(\"tab_size\")",
+			"view.settings().get(\"tab_size\"",
+			"view.settings()",
+			"view.settings().get",
+			"view.settings.get()",
+			"3 + 5",
+			"print(\"hello world\")",
+			"sys.subsystem('pwd')",
+			"sys.subcall('pwd')",
+			"sys.call('pwd')",
+			"sys",
+			"sys.pwd()",
+			"import sys",
+			"sys.pwd()",
+			"pwd()",
+			"pwd",
+			"ls"
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/christopher/tatakai"
+	],
+	"file_history":
+	[
+		"/home/christopher/tatakai/.sublime.sublime-project",
+		"/home/christopher/tatakai/.sublime-project",
+		"/home/christopher/tatakai/sublimegdb_main",
+		"/home/christopher/.config/sublime-text-3/Packages/User/Preferences.sublime-settings",
+		"/home/christopher/tatakai/src/flatland.cpp",
+		"/usr/include/freetype2/freetype/ftglyph.h",
+		"/usr/include/freetype2/ft2build.h",
+		"/usr/include/freetype2/freetype/freetype.h",
+		"/opt/sublime_text/sublime_plugin.py",
+		"/home/christopher/.config/sublime-text-3/Packages/User/Default (Linux).sublime-keymap",
+		"/opt/sublime_text/sublime.py",
+		"/home/christopher/.config/sublime-text-3/Packages/Default/Default (Linux).sublime-keymap",
+		"/home/christopher/Work/code/smack/mz_code/csfb_agg.java",
+		"/home/christopher/Work/code/smack/mz_code/csfb_filter.java",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/common/common.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/flow/CSFallback.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedState.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateSuite.scala",
+		"/home/christopher/Work/spark/streaming/src/test/scala/org/apache/spark/streaming/MapWithStateSuite.scala",
+		"/home/christopher/Work/spark/streaming/src/main/scala/org/apache/spark/streaming/dstream/MapWithStateDStream.scala",
+		"/home/christopher/.config/sublime-text-3/Packages/User/spark.sublime-build",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TODO.md",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateSpec.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateRDD.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateMap.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateDStream.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/CicsDStreamFunctions.scala",
+		"/home/christopher/.config/sublime-text-3/Packages/Default/Preferences.sublime-settings",
+		"/home/christopher/Work/spark/streaming/src/main/scala/org/apache/spark/streaming/dstream/PairDStreamFunctions.scala",
+		"/home/christopher/.config/sublime-text-3/Packages/User/smack.sublime-build",
+		"/home/christopher/Work/spark/streaming/target/java/org/apache/spark/streaming/dstream/PairDStreamFunctions.java",
+		"/home/christopher/Work/code/smack/ROADMAP.md",
+		"/home/christopher/Work/spark/streaming/src/test/scala/org/apache/spark/streaming/rdd/MapWithStateRDDSuite.scala",
+		"/home/christopher/Documents/kursledarmail.txt",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/utils/TimedStateTest.scala",
+		"/home/christopher/Work/code/smack/spark/src/test/scala/testTimedState.scala",
+		"/home/christopher/Work/code/smack/spark/src/main/scala/cics/Main.scala",
+		"/tmp/lol.cpp"
+	],
+	"find":
+	{
+		"height": 23.0
+	},
+	"find_in_files":
+	{
+		"height": 90.0,
+		"where_history":
+		[
+			"/opt/sublime_text/",
+			"~/Work/code/mz/",
+			"<open files>",
+			""
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"glyphs",
+			"height",
+			"glyphs",
+			"advance",
+			"END_CHAR",
+			"advance",
+			"height",
+			"advance",
+			"0.3",
+			"DEFAULT",
+			"glyphs",
+			"dim",
+			"addtext",
+			"addText",
+			"bucket",
+			"loadFont",
+			"initText",
+			"loadfont",
+			"GLuint",
+			"FT_Load_Char",
+			"loadfont",
+			"addtex",
+			"loadfont",
+			"END_CHAR",
+			"glyphs",
+			"addtext",
+			"point",
+			"center",
+			"rect",
+			"textSprites",
+			"addtext",
+			"height",
+			"printf",
+			"spriteShader",
+			"spriteSheet",
+			"compileShader",
+			"compileshader",
+			"sprite",
+			"vertex",
+			"rect",
+			"DEBUG",
+			"0.2",
+			"size",
+			"advance",
+			"size",
+			"textSprites",
+			"2048",
+			"addtext",
+			"textSprites",
+			"union",
+			"addtext",
+			"tex",
+			"glBindVertexArray",
+			"glGenVertexArrays",
+			"glBindVertexArray",
+			"fontTexture",
+			"Sprite ",
+			"Sprite",
+			"Sprite ",
+			"spritesVBO",
+			"sprites_V",
+			"glBindVertexArray",
+			"numsprite",
+			"sprites",
+			"loadfont",
+			"glokordie",
+			"loadtext",
+			"loadfont",
+			"text",
+			"sprite",
+			"s",
+			"sprite",
+			"Sprite",
+			"textsprites",
+			"CHARACTERS_MAX",
+			"SDL_assert",
+			"rect",
+			"Glyph",
+			"rect",
+			"sprite",
+			"CharBucket",
+			"advance",
+			"Glyph",
+			"sizes",
+			"height",
+			"glyphs",
+			"char2sprite",
+			"TODO",
+			"glyphs",
+			"spriteref",
+			"FT_GlyphSlotRec_",
+			"FT_GlyphSlot",
+			"FT_FaceRec_",
+			"face",
+			"j",
+			"glyph",
+			"flyph",
+			"free",
+			"hardRemove",
+			"TODO",
+			"do",
+			"auto tmp",
+			"newPos",
+			"textsprites",
+			"text",
+			"freeCharBuckets",
+			"text",
+			"block",
+			"text",
+			"block",
+			"start",
+			"text",
+			"result",
+			"TextRef",
+			"result",
+			"start",
+			"freeCharBuckets",
+			"invalidSpritePos",
+			"invalid",
+			"CharBucket",
+			"invalidSprite",
+			"hardRemove",
+			"remove",
+			"free",
+			"AddTextResult",
+			"textSpriteIndex",
+			"spritebucket",
+			"extend"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"text",
+			"geometry",
+			"0.4",
+			"Sprite",
+			"ref",
+			"block",
+			"TimedState",
+			"CsfbEvent",
+			"first",
+			"",
+			"timedState",
+			"TimedStateSpec",
+			"TimedState",
+			"TimedStateSpec",
+			"Timed",
+			"timed",
+			"testState",
+			"timedState",
+			"TimedState"
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.0
+	},
+	"input":
+	{
+		"height": 31.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.find_results":
+	{
+		"height": 53.0
+	},
+	"pinned_build_system": "Packages/Makefile/Make.sublime-build",
+	"project": ".sublime.sublime-project",
+	"replace":
+	{
+		"height": 42.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"todo",
+				"TODO.md"
+			],
+			[
+				"src",
+				"src/flatland.cpp"
+			],
+			[
+				"sgsapudr",
+				"cics/udr/SgsapUdr.scala"
+			],
+			[
+				"timedstate",
+				"cics/utils/TimedState.scala"
+			],
+			[
+				"csfbagg",
+				"~/Work/code/smack/mz_code/csfb_agg.java"
+			],
+			[
+				"spark.sub",
+				"~/.config/sublime-text-3/Packages/User/spark.sublime-build"
+			],
+			[
+				"timedstate.scala",
+				"cics/utils/TimedState.scala"
+			],
+			[
+				"timedstatespec",
+				"cics/utils/TimedStateSpec.scala"
+			],
+			[
+				"cics",
+				"cics/utils/CicsDStreamFunctions.scala"
+			],
+			[
+				"pairdstreamfu",
+				"spark/streaming/src/main/scala/org/apache/spark/streaming/dstream/PairDStreamFunctions.scala"
+			],
+			[
+				"pairds",
+				"spark/streaming/target/java/org/apache/spark/streaming/dstream/PairDStreamFunctions.java"
+			],
+			[
+				"mapwithstatesuit",
+				"~/Work/spark/streaming/src/test/scala/org/apache/spark/streaming/rdd/MapWithStateRDDSuite.scala"
+			],
+			[
+				"timedstatetest",
+				"utils/TimedStateTest.scala"
+			],
+			[
+				"suite",
+				"utils/TimedStateSuite.scala"
+			],
+			[
+				"staetspec",
+				"utils/TimedStateSpec.scala"
+			],
+			[
+				"rdd",
+				"utils/TimedStateRDD.scala"
+			],
+			[
+				"timedsrdd",
+				"utils/TimedStateRDD.scala"
+			],
+			[
+				"timedstatemap.scala",
+				"utils/TimedStateMap.scala"
+			],
+			[
+				"timedstaterdd",
+				"utils/TimedStateRDD.scala"
+			],
+			[
+				"timedrdd",
+				"utils/TimedStateRDD.scala"
+			],
+			[
+				"timedstaspec",
+				"utils/TimedStateSpec.scala"
+			],
+			[
+				"timedtest",
+				"utils/TimedStateTest.scala"
+			],
+			[
+				"main.s",
+				"Main.scala"
+			],
+			[
+				"timeds",
+				"utils/TimedState.scala"
+			],
+			[
+				"timed",
+				"utils/TimedState.scala"
+			],
+			[
+				"lol",
+				"/tmp/lol.cpp"
+			]
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 392.0,
+		"last_filter": "TimedState",
+		"selected_items":
+		[
+			[
+				"TimedState",
+				"TimedState"
+			],
+			[
+				"sgsapudr",
+				"SgsapUdr"
+			],
+			[
+				"compound_ran_",
+				"compound_ran_udr"
+			],
+			[
+				"Utils",
+				"Utils"
+			],
+			[
+				"test",
+				"testFunc"
+			]
+		],
+		"width": 952.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": false,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 285.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
