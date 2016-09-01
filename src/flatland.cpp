@@ -15,7 +15,6 @@
 
 typedef unsigned char Byte;
 
-
 void _glOkOrDie(const char* file, int line) {
   GLenum errorCode = glGetError();
   if (errorCode != GL_NO_ERROR) {
@@ -35,11 +34,20 @@ void _glOkOrDie(const char* file, int line) {
     exit(1);
   }
 }
-#if RELEASE
-#define glOKORDIE
+
+#ifdef DEBUG
+  #define DEBUGLOG(...) printf(__VA_ARGS__)
 #else
-#define glOKORDIE _glOkOrDie(__FILE__, __LINE__)
+  #define DEBUGLOG(...)
 #endif
+
+#if RELEASE
+  #define glOKORDIE
+#else
+  #define glOKORDIE _glOkOrDie(__FILE__, __LINE__)
+#endif
+
+#define FOR(it, start) for (auto it = start; it; next(&it))
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
 typedef unsigned int Uint;
 typedef unsigned char Byte;
@@ -432,6 +440,7 @@ namespace {
     return result;
   }
 
+  // Sprites
   const Uint SPRITES_MAX = 1024;
   Uint numSprites = 0;
   Sprite sprites[SPRITES_MAX];
@@ -446,28 +455,34 @@ namespace {
   SpriteRefSlot* spriteReferenceLocation[SPRITES_MAX];
   SpriteRef addSprite(Sprite s) {
     SDL_assert(numSprites < SPRITES_MAX);
-    if (numSprites == SPRITES_MAX) {
-      return 0;
-    }
-    Sprite* sprite = sprites + numSprites;
-    // create a reference to the new sprite
-    SpriteRefSlot* slot;
-    if (freeSpriteRefs) {
-      slot = freeSpriteRefs;
-      freeSpriteRefs = freeSpriteRefs->next;
-    } else {
-      SDL_assert(numSpriteRefs < SPRITES_MAX); // TODO: return null here if it fails
-      if (numSpriteRefs == SPRITES_MAX) {
-        return 0;
-      } else {
+    SpriteRef result = 0;
+    if (numSprites < SPRITES_MAX) {
+      Sprite* sprite = sprites + numSprites;
+
+      // create a reference to the new sprite
+      SpriteRefSlot* slot = 0;
+
+      if (freeSpriteRefs) {
+        slot = freeSpriteRefs;
+        freeSpriteRefs = freeSpriteRefs->next;
+      } else if (numSpriteRefs < SPRITES_MAX) {
         slot = spriteReferences + numSpriteRefs++;
+      } else {
+        DEBUGLOG("SpriteRef buffer is full\n");
       }
+
+      if (slot) {
+        *sprite = s;
+        slot->sprite = sprite;
+        spriteReferenceLocation[numSprites] = slot;
+        ++numSprites;
+
+        result = slot;
+      }
+    } else {
+      DEBUGLOG("Sprite buffer is full\n");
     }
-    *sprite = s;
-    slot->sprite = sprite;
-    spriteReferenceLocation[numSprites] = slot;
-    ++numSprites;
-    return slot;
+    return result;
   }
   inline void free(SpriteRef ref) { // invalidates references to this sprite
     SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
@@ -970,7 +985,7 @@ int main(int, const char*[]) {
     glBindVertexArray(spritesVAO);
     glGenBuffers(1, &spritesVBO);
     glBindBuffer(GL_ARRAY_BUFFER, spritesVBO);
-    glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, SPRITES_MAX*sizeof(Sprite), 0, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
@@ -1045,19 +1060,22 @@ int main(int, const char*[]) {
       {
         switch (event.type) {
           case SDL_KEYDOWN: {
-            printf("A key was pressed\n");
             if (event.key.keysym.sym == SDLK_ESCAPE) {
               exit(0);
             }
             for (int i = 0; i < KEY_MAX; ++i) {
               if (event.key.keysym.sym == keyCodes[i]) {
+
                 wasPressed[i] = !isDown[i];
                 isDown[i] = true;
+                #ifdef DEBUG
+                  if (wasPressed[i]) DEBUGLOG("A key was pressed\n");
+                #endif
               }
             }
           } break;
           case SDL_KEYUP: {
-            printf("A key was released\n");
+            DEBUGLOG("A key was released\n");
             for (int i = 0; i < KEY_MAX; ++i) {
               if (event.key.keysym.sym == keyCodes[i]) {
                 isDown[i] = false;
@@ -1076,7 +1094,7 @@ int main(int, const char*[]) {
     }
 
     // update entities
-    for (EntityIter iter = iterEntities(); iter; next(&iter)) {
+    FOR(iter, iterEntities()) {
       Entity* entity = get(iter);
       switch (entity->type) {
         case EntityType_Player: {
@@ -1122,7 +1140,7 @@ int main(int, const char*[]) {
         moveBox = pad(moveBox, entity->hitBox);
         Uint numHits = 0;
         Entity** hits = 0;
-        for (auto target_iter = iterEntities(); target_iter; next(&target_iter)) {
+        FOR(target_iter, iterEntities()) {
           if (iter == target_iter) continue;
           Entity* target = get(target_iter);
           Rect padded = pad(moveBox, target->hitBox);
@@ -1221,16 +1239,16 @@ int main(int, const char*[]) {
     }
 
     // randomly add some text
-    local_persist TextRef texts[16];
+    local_persist TextRef texts[512];
     local_persist uint numTexts = 0;
-    if (multipleOf(rand(), 30) && numTexts < 16) {
+    if (multipleOf(rand(), 2) && numTexts < 512) {
       // add text
       char* text = (char*) stackCurr;
       int n = sprintf(text, "It's over %u!", rand());
       pushArr(int, n);
       texts[numTexts++] = addText(text, {frand(-1, 1), frand(-1, 1)}, 0.05, true);
       popArr(int, n);
-    } else if (numTexts == 16 || (multipleOf(rand(), 20) && numTexts > 0)) {
+    } else if (numTexts == 512 || (multipleOf(rand(), 70) && numTexts > 0)) {
       // remove text
       uint i = uint(rand())%numTexts;
       remove(texts[i]);
@@ -1238,7 +1256,7 @@ int main(int, const char*[]) {
     }
 
     // clean up removed entities
-    for (auto iter = iterEntities(); iter; next(&iter)) {
+    FOR(iter, iterEntities()) {
       SDL_assert(get(iter));
       if (isset(get(iter), EntityFlag_Removed)) {
         free(get(iter));
@@ -1260,7 +1278,7 @@ int main(int, const char*[]) {
 
       glBindVertexArray(spritesVAO);
       glBindBuffer(GL_ARRAY_BUFFER, spritesVBO);
-      glBufferData(GL_ARRAY_BUFFER, numSprites*sizeof(Sprite), sprites, GL_DYNAMIC_DRAW);
+      glBufferSubData(GL_ARRAY_BUFFER, 0, numSprites*sizeof(Sprite), sprites);
       glUniform2f(viewLocation, viewPosition.x, viewPosition.y);
       glDrawArrays(GL_POINTS, 0, numSprites);
       glOKORDIE;

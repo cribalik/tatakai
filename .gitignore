@@ -26,4 +26,7 @@
 *.exe
 *.out
 *.app
+
+# Text editor stuff
 tags
+*.sublime-workspace
