@@ -11,7 +11,8 @@
 #define STB_RECT_PACK_IMPLEMENTATION 1
 #include <stb_rect_pack.h>
 
-#define DEBUG
+// #define DEBUG
+#define DEBUG_FONT
 
 typedef unsigned char Byte;
 
@@ -344,8 +345,8 @@ namespace {
         uint i = *c;
         *bucket = Sprite{
           Rect{
-            pos.x + (glyphs[i].dim.x - glyphs[i].dim.w/2) * scale,
-            pos.y,
+            pos.x + glyphs[i].dim.x * scale,
+            pos.y + glyphs[i].dim.y * scale,
             glyphs[i].dim.w * scale,
             glyphs[i].dim.h * scale,
           },
@@ -582,7 +583,7 @@ namespace {
   inline Entity* get(EntityRef ref) {
     Entity* result = 0;
     if (!ref.entity) {
-      result = NULL;
+      result = 0;
     }
     else if (ref.id == ref.entity->id) {
       result = ref.entity;
@@ -597,7 +598,8 @@ namespace {
     SDL_assert(numEntities > 0);
     set(e, EntityFlag_Removed);
   };
-  inline void free(Entity* e) { // invalidates all references to this entity
+  // invalidates all references to this entity
+  inline void free(Entity* e) {
     SDL_assert(slotOf(e) >= entities && slotOf(e) < entities+ENTITIES_MAX);
     EntitySlot* slot = slotOf(e);
     slot->used = false;
@@ -778,7 +780,6 @@ namespace {
       if (!r->was_packed) {
         puts("Failed to pack font");
       }
-      printf("%u %i %i\n", r->id, r->x, r->y);
       maxW = glm::max((uint) r->x + r->w, maxW);
       maxH = glm::max((uint) r->y + r->h, maxW);
     }
@@ -809,18 +810,16 @@ namespace {
 
     // load glyphs into texture
     for (char i = START_CHAR; i < END_CHAR; ++i) {
-      printf("%c ", i);
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
-        printf("failed to load char %c at %u\n", i, __LINE__);
+        DEBUGLOG("failed to load char %c at %u\n", i, __LINE__);
         continue;
       }
 
-      #ifdef DEBUG
+      #ifdef DEBUG_FONT
         unsigned char* c = face->glyph->bitmap.buffer;
         for (uint i = 0; i < face->glyph->bitmap.width; ++i) {
           auto p = c;
           for (uint j = 0; j < face->glyph->bitmap.rows; ++j) {
-            printf("%u ", *p);
             ++p;
           }
           c += face->glyph->bitmap.pitch;
@@ -835,16 +834,18 @@ namespace {
       glOKORDIE;
 
       // save glyph offsets
-      auto w = face->glyph->bitmap.width;
-      auto h = face->glyph->bitmap.rows;
-      float fheight = (float) height;
-      printf("bx: %i by: %i advx: %li advy: %li\n", face->glyph->bitmap_left, face->glyph->bitmap_top, face->glyph->advance.x, face->glyph->advance.y);
+      int w = face->glyph->bitmap.width;
+      int h = face->glyph->bitmap.rows;
+      float fheight = height;
+      #ifdef DEBUG_FONT
+      printf("%c: bx: %i by: %i h: %i w: %i advx: %li advy: %li\n", i, face->glyph->bitmap_left, face->glyph->bitmap_top, h, w, face->glyph->advance.x, face->glyph->advance.y);
+      #endif
       glyphs[(int) i] = Glyph{
         Rect{
-          (float(face->glyph->bitmap_left) + w/2.0f)/fheight,
-          (float(face->glyph->bitmap_top) + h/2.0f)/fheight,
-          (float) w/fheight,
-          (float) h/fheight
+          face->glyph->bitmap_left/fheight,
+          (face->glyph->bitmap_top - h)/fheight,
+          w/fheight,
+          h/fheight
         },
         float(face->glyph->advance.x)/fheight/64.0f,
         Rect{(float) rect->x, (float) rect->y, (float) rect->w, (float) rect->h},
@@ -896,9 +897,14 @@ namespace {
     bool result = false;
     orderByType(&a, &b);
 
-    if (checkTypeAndSwap(&a, &b, EntityType_Player, EntityType_Fairy)) {
+    if (a->type == EntityType_Wall || b->type == EntityType_Wall) {
+      DEBUGLOG("Entered wall: %u", entered);
+      result = entered;
+    }
+
+    else if (checkTypeAndSwap(&a, &b, EntityType_Player, EntityType_Fairy)) {
       // a is now player, b is fairy
-      printf("Passing through\n");
+      printf("Fairy hit player\n");
       a->health += b->health;
       remove(b);
       result = true;
@@ -945,9 +951,11 @@ int main(int, const char*[]) {
   {
     for (int i = 0; i < 10; ++i) {
       Entity* fairy = addEntity();
-      fairy->sprite = addSprite({0, 0, 0.1, 0.1, 585, 0, 94, 105});
+      fairy->pos = {frand(-0.8, 0.8), frand(-0.8, 0.8)};
+      fairy->sprite = addSprite({rectAround(fairy->pos, 0.1, 0.1), 585, 0, 94, 105});
       fairy->follow = createRef(player);
       fairy->type = EntityType_Fairy;
+      fairy->hitBox = rectAround({0,0}, 0.05, 0.05);
       fairy->health = 5;
     }
   }
@@ -959,6 +967,7 @@ int main(int, const char*[]) {
       {-1, -1, 0.1, 2},
       {-1, 0.9, 2, 0.1},
       {0.9, -1, 0.1, 2},
+      rectAround({}, 0.5, 0.5),
     };
     for (Uint i = 0; i < arrsize(walls); ++i) {
       Entity* wall = addEntity();
@@ -972,7 +981,7 @@ int main(int, const char*[]) {
 
   // init some text
   {
-    addText("Hello world 1234567890", {}, 0.15, true);
+    addText("HejsanSvejsan", {0, 0}, 0.10, true);
     // textSprites[0] = {rectAround({0, 0}, 2, 2), glyphs['m'].tex};
     // textSprites[1] = {rectAround({0, 0}, 2, 2), Rect{0, 0, 1024, 1024}};
   }
@@ -1093,13 +1102,31 @@ int main(int, const char*[]) {
       SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
     }
 
+    if (wasPressed[KEY_A]) {
+      if (player) {
+        remove(player);
+        player = 0;
+      } else {
+        const float w = 0.1, h = 0.1;
+        player = addEntity();
+        player->pos = {};
+        // TODO: get spritesheet info from external source
+        player->sprite = addSprite({rectAround(player->pos, w, h), Rect{11, 7, 70, 88}});
+        player->type = EntityType_Player;
+        player->hitBox = rectAround({}, w, h);
+        player->health = 10;
+      }
+    }
+
     // update entities
     FOR(iter, iterEntities()) {
       Entity* entity = get(iter);
+
+      // per-type update
       switch (entity->type) {
         case EntityType_Player: {
           const float ACCELLERATION = 6;
-          const float GRAVITY = 6;
+          const float GRAVITY = 12;
           const float JUMPPOWER = 10;
           const float DRAG = 0.90;
 
@@ -1114,20 +1141,25 @@ int main(int, const char*[]) {
           entity->vel.y -= GRAVITY * dt;
         } break;
         case EntityType_Fairy: {
-          const float ACCELLERATION = 3.0f + frand(-2, 2);
+          const float ACCELLERATION = 2.0f + frand(-2, 2);
           const float DRAG = 0.97;
           const float NOISE = 0.2;
           Entity* target = get(entity->follow);
-          vec2 diff = target->pos - entity->pos + v2rand(NOISE);
-          entity->vel += ACCELLERATION * dt * glm::normalize(diff);
+          if (target) {
+            vec2 diff = target->pos - entity->pos + v2rand(NOISE);
+            entity->vel += ACCELLERATION * dt * glm::normalize(diff);
+          }
           entity->vel *= DRAG;
         } break;
         case EntityType_Wall: {
         } break;
       };
+
       // collision
       if (!isset(entity, EntityFlag_NoCollide)) {
         // find the possible collisions for the move vector
+
+        // get the bounding box for the movement
         vec2 oldPos = entity->pos;
         vec2 newPos = oldPos + (entity->vel * dt);
         vec2 move = newPos - oldPos;
@@ -1138,42 +1170,34 @@ int main(int, const char*[]) {
           glm::abs(move.y),
         };
         moveBox = pad(moveBox, entity->hitBox);
+
+        // find possible collisions
         Uint numHits = 0;
-        Entity** hits = 0;
+        Entity** hits = (Entity**) stackCurr;
         FOR(target_iter, iterEntities()) {
           if (iter == target_iter) continue;
           Entity* target = get(target_iter);
           Rect padded = pad(moveBox, target->hitBox);
-          /*
-          if (target == entities+numEntities-1 && entity == entities) {
-            printf("%u %u\n", entity->type, target->type);
-            print("moveBox", moveBox);
-            print("padded", padded);
-            print("hitBox", entity->hitBox);
-            print("pos", target->pos);
-            printf("%u %u\n", isset(target, EntityFlag_Collides), collision(padded, target->pos));
-          }
-          */
           if (!isset(target, EntityFlag_NoCollide) && collision(padded, target->pos)) {
             ++numHits;
-            Entity** ptr = (Entity**) push(Entity*);
+            auto ptr = (Entity**) push(Entity*);
             *ptr = target;
-            if (!hits) {
-              hits = ptr;
-            }
           }
         }
 
-        if (hits) {
+        // process the found boxes
+        if (numHits) {
           for (int iters = 0; iters < 4; ++iters) {
             float t = 1.0f;
+            vec2 endPoint = oldPos + move;
+
             Entity** hit = 0;
             vec2 closestWall;
-            vec2 endPoint = oldPos + move;
-            for (Uint j = 0; j < numHits; ++j) {
+            for (Entity** targetPtr = hits; targetPtr < hits+numHits; ++targetPtr) {
+              Entity* target = *targetPtr;
               // find the shortest T for collision
               // TODO: Optimize: If we only use horizontal and vertical lines, we can optimize. Also precalculate corners, we do it twice now
-              Rect padded = pad(hits[j]->pos + hits[j]->hitBox, entity->hitBox);
+              Rect padded = pad(target->pos + target->hitBox, entity->hitBox);
               // TODO: In the future, maybe we can have all sides of a polygon here instead?
               Line lines[4] = {
                 Line{bottomLeft(padded), bottomRight(padded)},
@@ -1186,23 +1210,16 @@ int main(int, const char*[]) {
                 if (r.hit && r.t < t) {
                   const float epsilon = 0.001;
                   t = glm::max(0.0f, r.t-epsilon);
-                  hit = hits + j;
+                  hit = targetPtr;
                   closestWall = line2vector(lines[l]);
                 }
               }
               SDL_assert(t >= 0);
             }
+
             if (hit) {
-              #if 0
-                printf("Hit!\n");
-                printf("%u %u\n", (Uint) entity->type, (Uint) entity->type);
-                print("moveBox", moveBox);
-                print("hitBox", entity->hitBox);
-                print("move", move);
-                printf("t: %f\n", t);
-              #endif
-              Entity* hitEntity = *hit;
-              bool passThrough = processCollision(entity, hitEntity, oldPos, endPoint, collision(hitEntity->hitBox + hitEntity->pos, endPoint));
+              Entity* target = *hit;
+              bool passThrough = processCollision(entity, target, oldPos, endPoint, collision(target->hitBox + target->pos, entity->hitBox + entity->pos));
               if (!passThrough) {
                 auto glide = dot(move, closestWall)*(1.0f-t) * closestWall / lengthSqr(closestWall);
                 // move up to wall
@@ -1213,18 +1230,21 @@ int main(int, const char*[]) {
               } else {
                 // We remove this from hittable things and continue towards other collision
                 --iters;
-                hits[hit-hits] = hits[--numHits];
+                *hit = hits[--numHits];
                 pop(Entity*);
               }
-            } else {
+            }
+            else {
               break;
             }
+
           };
           popArr(Entity*, numHits);
           SDL_assert(getCurrStackPos() == (void*) hits);
         }
         entity->vel = move/dt;
       }
+
       vec2 move = entity->vel * dt;
       const float moveEpsilon = 0.001;
       Sprite* sprite = get(entity->sprite);
@@ -1239,21 +1259,23 @@ int main(int, const char*[]) {
     }
 
     // randomly add some text
-    local_persist TextRef texts[512];
-    local_persist uint numTexts = 0;
-    if (multipleOf(rand(), 2) && numTexts < 512) {
-      // add text
-      char* text = (char*) stackCurr;
-      int n = sprintf(text, "It's over %u!", rand());
-      pushArr(int, n);
-      texts[numTexts++] = addText(text, {frand(-1, 1), frand(-1, 1)}, 0.05, true);
-      popArr(int, n);
-    } else if (numTexts == 512 || (multipleOf(rand(), 70) && numTexts > 0)) {
-      // remove text
-      uint i = uint(rand())%numTexts;
-      remove(texts[i]);
-      texts[i] = texts[--numTexts];
-    }
+    #ifdef DEBUG
+      local_persist TextRef texts[512];
+      local_persist uint numTexts = 0;
+      if (multipleOf(rand(), 2) && numTexts < 512) {
+        // add text
+        char* text = (char*) stackCurr;
+        int n = sprintf(text, "It's over %u!", rand());
+        pushArr(int, n);
+        texts[numTexts++] = addText(text, {frand(-1, 1), frand(-1, 1)}, 0.05, true);
+        popArr(int, n);
+      } else if (numTexts == 512 || (multipleOf(rand(), 70) && numTexts > 0)) {
+        // remove text
+        uint i = uint(rand())%numTexts;
+        remove(texts[i]);
+        texts[i] = texts[--numTexts];
+      }
+    #endif
 
     // clean up removed entities
     FOR(iter, iterEntities()) {
@@ -1265,7 +1287,7 @@ int main(int, const char*[]) {
 
     // begin draw
     {
-      glClearColor(1,0,0,1);
+      glClearColor(0.1,0.1,0.1,1);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
@@ -1311,4 +1333,5 @@ int main(int, const char*[]) {
       }
     #endif
   }
+
 }
