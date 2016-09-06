@@ -50,11 +50,12 @@ void _glOkOrDie(const char* file, int line) {
 
 #define FOR(it, start) for (auto it = start; it; next(&it))
 #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
+#define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
+
 typedef unsigned int Uint;
 typedef unsigned char Byte;
-#define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
-#define local_persist static
 #define MegaBytes(x) ((x)*1024LL*1024LL)
+#define local_persist static
 #define unimplemented printf("unimplemented method %s:%u\n", __FILE__, __LINE__)
 
 
@@ -64,6 +65,9 @@ namespace {
 
   using glm::vec2;
   using glm::vec3;
+
+  // constants
+  float GRAVITY = 12;
 
   // Init
   int screen_w = 800;
@@ -115,6 +119,7 @@ namespace {
   }
 
   // Math
+  struct Color {GLfloat r,g,b,a;};
   #define MAX(a, b) ((a) < (b) ? (b) : (a))
   inline Uint log2(Uint x) {
     Uint result = 0;
@@ -156,6 +161,9 @@ namespace {
   // Physics
   struct Rect {
     float x,y,w,h;
+  };
+  struct Recti {
+    int x,y,w,h;
   };
   inline Rect operator+(Rect r, vec2 v) {
     return Rect{r.x + v.x, r.y + v.y, r.w, r.h};
@@ -253,6 +261,7 @@ namespace {
 
   // Sprites
   // OpenGL layout
+  struct Character;
   struct Sprite {
     union {
       struct {
@@ -260,8 +269,8 @@ namespace {
       };
       struct {
         Rect _; // texture
-        struct { // Allocator information
-          Sprite* next;
+        struct { // Allocator information for texts
+          Character* next;
           uint size;
         };
       };
@@ -270,6 +279,9 @@ namespace {
       };
     };
   };
+  inline Sprite operator+(Sprite s, vec2 d) {
+    return Sprite{s.screen + d, s.tex};
+  }
   inline Rect invalidSpritePos() {
     return {-100, -100};
   }
@@ -284,19 +296,23 @@ namespace {
     Rect tex;
   };
   Glyph glyphs[256];
+  struct Character {
+    Sprite sprite;
+    Color color;
+  };
   const Uint CHARACTERS_MAX = 1024;
   bool textDirty = false;
-  Sprite textSprites[CHARACTERS_MAX];
-  Sprite* freeChars;
-  Sprite* textSpritesMax = textSprites;
+  Character textSprites[CHARACTERS_MAX];
+  Character* freeChars;
+  Character* textSpritesMax = textSprites;
   struct TextRef {
     // TODO: squish together these bits?
-    Sprite* block;
+    Character* block;
     uint size;
   };
   inline bool isnull(TextRef ref) {return !ref.block;}
   // text can only have one parent, multiple frees are not supported
-  TextRef addText(const char* text, vec2 pos, float scale, bool center = false) {
+  TextRef addText(const char* text, vec2 pos, float scale, Color color, bool center = false) {
     TextRef result = {};
     SDL_assert(text);
     if (!text) return result;
@@ -304,26 +320,26 @@ namespace {
     uint len = strlen(text);
     // find large enough block (first fit)
     // TODO: best fit?
-    Sprite** p = &freeChars;
-    while (*p && (*p)->size < len) {
-      p = &(*p)->next;
+    Character** p = &freeChars;
+    while (*p && (*p)->sprite.size < len) {
+      p = &(*p)->sprite.next;
     }
     if (*p) {
-      Sprite* block = *p;
+      Character* block = *p;
 
       // set dirty flag
       textDirty = true;
 
       // free space
-      if (len < (*p)->size) {
+      if (len < (*p)->sprite.size) {
         // add the space that is left over
-        Sprite* newBucket = *p + len;
-        newBucket->size = (*p)->size - len;
-        newBucket->next = (*p)->next;
+        Character* newBucket = *p + len;
+        newBucket->sprite.size = (*p)->sprite.size - len;
+        newBucket->sprite.next = (*p)->sprite.next;
         *p = newBucket;
       } else {
         // skip to next block
-        *p = (*p)->next;
+        *p = (*p)->sprite.next;
       }
 
       #ifdef DEBUG
@@ -340,17 +356,18 @@ namespace {
       }
 
       // fill the sprites
-      Sprite* bucket = block;
+      Character* bucket = block;
       for (const char* c = text; *c; ++c, ++bucket) {
         uint i = *c;
-        *bucket = Sprite{
+        *bucket = Character{
           Rect{
             pos.x + glyphs[i].dim.x * scale,
             pos.y + glyphs[i].dim.y * scale,
             glyphs[i].dim.w * scale,
             glyphs[i].dim.h * scale,
           },
-          glyphs[i].tex
+          glyphs[i].tex,
+          color,
         };
         pos.x += glyphs[i].advance * scale;
       }
@@ -373,46 +390,46 @@ namespace {
       #endif
       // hide the removed sprites
       for (uint i = 0; i < ref.size; ++i) {
-        ref.block[i].screen = invalidSpritePos();
+        ref.block[i].sprite.screen = invalidSpritePos();
       }
       // free block
       // we want the freelist to be ordered, find the free block before this block
-      ref.block->size = ref.size;
-      ref.block->next = 0;
-      Sprite* leftFree = ref.block;
+      ref.block->sprite.size = ref.size;
+      ref.block->sprite.next = 0;
+      Character* leftFree = ref.block;
       if (!freeChars) {
         freeChars = ref.block;
       } else if (freeChars > ref.block) {
         if (freeChars == ref.block + ref.size) {
           // merge
-          ref.block->size += freeChars->size;
+          ref.block->sprite.size += freeChars->sprite.size;
         }
         else {
           // append
-          ref.block->next = freeChars;
+          ref.block->sprite.next = freeChars;
         }
         freeChars = ref.block;
       } else {
         // Find the block before the freed block
-        Sprite* l = freeChars;
-        Sprite* m = ref.block;
-        while (l->next && l->next < m) {
-          l = l->next;
+        Character* l = freeChars;
+        Character* m = ref.block;
+        while (l->sprite.next && l->sprite.next < m) {
+          l = l->sprite.next;
         }
-        Sprite* r = l->next;
+        Character* r = l->sprite.next;
         // block is to the left, block->next is to the right of the freed block
-        l->next = m;
-        m->next = r;
+        l->sprite.next = m;
+        m->sprite.next = r;
         SDL_assert((l < m) && (!r || m < r));
         // merge right
-        if (r && m + m->size == r) {
-          m->size += r->size;
-          m->next = r->next;
+        if (r && m + m->sprite.size == r) {
+          m->sprite.size += r->sprite.size;
+          m->sprite.next = r->sprite.next;
         }
         // merge left
-        if (l + l->size == m) {
-          l->size += m->size;
-          l->next = m->next;
+        if (l + l->sprite.size == m) {
+          l->sprite.size += m->sprite.size;
+          l->sprite.next = m->sprite.next;
           leftFree = l;
         }
       }
@@ -433,16 +450,16 @@ namespace {
   GLuint initText() {
     GLuint result = loadFont("assets/monaco.ttf", 48);
     for (uint i = 0; i < CHARACTERS_MAX; ++i) {
-      textSprites[i].screen = invalidSpritePos();
+      textSprites[i].sprite.screen = invalidSpritePos();
     }
     freeChars = textSprites;
-    freeChars->size = CHARACTERS_MAX;
-    freeChars->next = 0;
+    freeChars->sprite.size = CHARACTERS_MAX;
+    freeChars->sprite.next = 0;
     return result;
   }
 
   // Sprites
-  const Uint SPRITES_MAX = 1024;
+  const Uint SPRITES_MAX = 8192;
   Uint numSprites = 0;
   Sprite sprites[SPRITES_MAX];
   union SpriteRefSlot {
@@ -512,14 +529,16 @@ namespace {
   vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 
   // Entities
-  enum EntityType : Uint {
+  enum EntityType : Uint32 {
     EntityType_Player,
     EntityType_Fairy,
     EntityType_Wall,
+    EntityType_Max,
   };
   enum EntityFlag : Uint32 {
     EntityFlag_NoCollide = 1 << 0,
     EntityFlag_Removed = 1 << 1,
+    EntityFlag_Gravity = 1 << 2,
   };
   struct Entity;
   struct EntityRef {
@@ -527,29 +546,31 @@ namespace {
     Entity* entity;
   };
   struct Entity {
-    Uint id; //TODO: should this be 64 bit?
+    Uint id; //TODO: should this be 64 bit to minimize odds of a reference to a wraparound id?
     EntityType type;
-    Uint32 flags;
+    EntityFlag flags;
 
     vec2 pos;
     vec2 vel;
-    SpriteRef sprite;
+    // SpriteRef sprite;
+    float width, height;
     Rect hitBox;
 
     // familiar stuff
     EntityRef follow;
 
     // player stuff
+    char direction; // -1 left, 1 right
     Uint health;
   };
   inline bool isset(Entity* e, EntityFlag flag) {
     return e->flags & flag;
   }
   inline void set(Entity* e, EntityFlag flag) {
-    e->flags |= flag;
+    e->flags = (EntityFlag) (e->flags | flag);
   }
   inline void unset(Entity* e, EntityFlag flag) {
-    e->flags &= ~flag;
+    e->flags = (EntityFlag) (~flag & e->flags);
   }
   struct EntitySlot {
     bool used;
@@ -558,24 +579,31 @@ namespace {
       EntitySlot* next;
     };
   };
-  const Uint ENTITIES_MAX = 1024;
+  const Uint ENTITIES_MAX = 8192;
   Uint numEntities = 0;
   EntitySlot* freeEntities = 0;
   Uint entityId = 0;
+  // FIXME: Se use only an entity id to check if references are outdated. This can wrap around, allowing for errors :(
   EntitySlot entities[ENTITIES_MAX] = {};
   Entity* addEntity() {
-    EntitySlot* slot;
+    EntitySlot* slot = 0;
     if (freeEntities) {
       slot = freeEntities;
+      // FIXME: segfault here, freeEntities not pointing within array
       freeEntities = freeEntities->next;
-    } else {
-      SDL_assert(numEntities < ENTITIES_MAX);
+    } else if (numEntities < ENTITIES_MAX) {
       slot = entities + numEntities++;
     }
-    slot->used = true;
-    slot->entity = {};
-    slot->entity.id = entityId++;
-    return &slot->entity;
+    SDL_assert(slot);
+
+    Entity* result = 0;
+    if (slot) {
+      slot->used = true;
+      slot->entity = {};
+      slot->entity.id = entityId++;
+      result = &slot->entity;
+    }
+    return result;
   };
   inline EntityRef createRef(Entity* target) {
     return {target->id, target};
@@ -601,16 +629,15 @@ namespace {
   // invalidates all references to this entity
   inline void free(Entity* e) {
     SDL_assert(slotOf(e) >= entities && slotOf(e) < entities+ENTITIES_MAX);
-    EntitySlot* slot = slotOf(e);
-    slot->used = false;
-    freeEntities = slot;
-    slot->next = freeEntities;
-    if (e->sprite) {
-      free(e->sprite);
+    if (e) {
+      EntitySlot* slot = slotOf(e);
+      slot->used = false;
+      slot->next = freeEntities;
+      freeEntities = slot;
     }
   };
   // should warn us about double frees separated by frame. (The same frame is OK)
-  inline void remove(EntityRef ref) { 
+  inline void remove(EntityRef ref) {
     SDL_assert(ref.id == ref.entity->id);
     if (ref.id == ref.entity->id) {
       remove(ref.entity);
@@ -639,6 +666,12 @@ namespace {
   }
 
   // memory
+  struct Block32 {
+    union {
+      Uint32 uints[8];
+    };
+    Block32* next;
+  };
   const Uint STACK_MAX = MegaBytes(128);
   Byte stack[STACK_MAX];
   Byte* stackCurr = stack;
@@ -651,13 +684,18 @@ namespace {
     SDL_assert(stackCurr - size >= stack);
     stackCurr -= size;
   }
-  void* getCurrStackPos() {
-    return stackCurr;
-  }
-  #define push(type) _push(sizeof(type))
-  #define pushArr(type, count) _push(sizeof(type)*count)
+  #define push(type) (type*) _push(sizeof(type))
+  #define pushArr(type, count) (type*) _push(sizeof(type)*count)
   #define pop(type) _pop(sizeof(type))
   #define popArr(type, count) _pop(sizeof(type)*count)
+  int pushStr(const char* fmt, ...) {
+    va_list(args);
+    va_start(args, fmt);
+    int n = vsprintf((char*) stackCurr, fmt, args);
+    pushArr(char, n);
+    return n;
+  }
+  #define popStr _pop
 
   // openGL
   GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
@@ -877,6 +915,42 @@ namespace {
   void print(const char* str, vec2 v) {
     printf("%s: %f %f\n", str, v.x, v.y);
   }
+  void print(const char* str, Sprite s) {
+    printf("%s: ", str);
+    print("", s.screen);
+    print(" - ", s.tex);
+  }
+
+  // Levels
+  // basically loads in a bunch of walls
+  void loadLevel(uint i) {
+    char* filename = (char*) stackCurr;
+    int n = pushStr("assets/%u.lvl", i);
+    DEBUGLOG("Opening level file %s", filename);
+    auto f = fopen(filename, "r");
+    if (f) {
+      while (1) {
+        Rect r;
+        int res = fscanf(f, "%f%f%f%f", &r.x,&r.y,&r.w,&r.h);
+        if (res && res != EOF) {
+          Entity* e = addEntity();
+          if (e) {
+            e->pos = center(r);
+            e->type = EntityType_Wall;
+            e->hitBox = rectAround({}, r.w, r.h);
+          } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate entity while loading level");
+          }
+        } else {
+          break;
+        }
+      }
+      fclose(f);
+    } else {
+      SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to open level file \"%s\"\n", filename);
+    }
+    popStr(n);
+  }
 
   // Gameplay
   // Check if a and b has types at and bt, and swaps a and b if needed so that a->type == at and b->type == bt
@@ -904,10 +978,14 @@ namespace {
 
     else if (checkTypeAndSwap(&a, &b, EntityType_Player, EntityType_Fairy)) {
       // a is now player, b is fairy
-      printf("Fairy hit player\n");
-      a->health += b->health;
-      remove(b);
-      result = true;
+      result = true; // always pass through
+      if (!entered) {
+        a->health += b->health;
+        // remove(b);
+      }
+    }
+    else if (checkTypeAndSwap(&a, &b, EntityType_Fairy, EntityType_Player)) {
+      printf("WHAAAT");
     }
 
     return result;
@@ -919,7 +997,76 @@ namespace {
     }
     struct X {Rect a,b;};
     SDL_assert(sizeof(X) == sizeof(Sprite));
+    SDL_assert(sizeof(Block32) == 32 + sizeof(void*));
     return true;
+  }
+
+  // visual models
+  struct SpriteAnim {
+    Rect modelTransform;
+    Recti texOrig;
+    Block32* delay;
+    uint numFrames;
+    uint cols;
+  };
+  enum ModelType {
+    ModelType_Sprite,
+    ModelType_Anim,
+  };
+  struct Model {
+    ModelType type;
+    union {
+      Sprite sprite;
+      SpriteAnim anim;
+    };
+    Model* next;
+  };
+  // TODO: extend models to be graphs of animation transitions
+  Model* models[EntityType_Max] = {};
+  void loadModel(EntityType type) {
+    // TODO: get this stuff from file
+    if (!models[type]) {
+      Model* model = 0;
+      switch (type) {
+
+        case EntityType_Player: {
+
+          model = push(Model);
+          *model = {};
+          model->type = ModelType_Anim;
+          model->anim.modelTransform = rectAround({}, 0.1 ,0.1);
+          model->anim.texOrig = Recti{11,7,70,88};
+          model->anim.delay = push(Block32);
+          model->anim.numFrames = 8;
+          for (int i = 0; i < model->anim.numFrames; ++i) {
+            model->anim.delay[i] = 100;
+          }
+          model->anim.cols = 4;
+
+        } break;
+
+        case EntityType_Fairy: {
+
+          model = push(Model);
+          *model = {};
+          model->type = ModelType_Sprite;
+          model->sprite = {rectAround({}, 0.1, 0.1), Rect{0, 282, 142, 142}};
+
+        } break;
+
+        case EntityType_Wall: {
+
+          model = push(Model);
+          *model = {};
+          model->type = ModelType_Sprite;
+          model->sprite = {Rect{}, Rect{0, 282, 142, 142}};
+
+        } break;
+
+        case EntityType_Max: break;
+      }
+      models[type] = model;
+    }
   }
 };
 
@@ -935,53 +1082,29 @@ int main(int, const char*[]) {
   GLuint fontTexture = initText();
 
   // init player
-  Entity* player;
+  EntityRef player;
   {
     const float w = 0.1, h = 0.1;
-    player = addEntity();
-    player->pos = {};
+    Entity* playerP = addEntity();
+    playerP->pos = {};
     // TODO: get spritesheet info from external source
-    player->sprite = addSprite({rectAround(player->pos, w, h), Rect{11, 7, 70, 88}});
-    player->type = EntityType_Player;
-    player->hitBox = rectAround({}, w, h);
-    player->health = 10;
+    // playerP->sprite = addSprite({rectAround(playerP->pos, w, h), Rect{11, 7, 70, 88}});
+    playerP->type = EntityType_Player;
+    playerP->hitBox = rectAround({}, w, h);
+    playerP->health = 10;
+    player = createRef(playerP);
   }
 
-  // init fairies
-  {
-    for (int i = 0; i < 10; ++i) {
-      Entity* fairy = addEntity();
-      fairy->pos = {frand(-0.8, 0.8), frand(-0.8, 0.8)};
-      fairy->sprite = addSprite({rectAround(fairy->pos, 0.1, 0.1), 585, 0, 94, 105});
-      fairy->follow = createRef(player);
-      fairy->type = EntityType_Fairy;
-      fairy->hitBox = rectAround({0,0}, 0.05, 0.05);
-      fairy->health = 5;
-    }
-  }
-
+  loadModel(EntityType_Player);
+  loadModel(EntityType_Fairy);
+  loadModel(EntityType_Wall);
   // init level
-  {
-    Rect walls[] = {
-      {-1, -1, 2, 0.1},
-      {-1, -1, 0.1, 2},
-      {-1, 0.9, 2, 0.1},
-      {0.9, -1, 0.1, 2},
-      rectAround({}, 0.5, 0.5),
-    };
-    for (Uint i = 0; i < arrsize(walls); ++i) {
-      Entity* wall = addEntity();
-      wall->pos = center(walls[i]);
-      wall->sprite = addSprite({walls[i], 0, 282, 142, 142});
-      wall->hitBox = rectAround({}, walls[i].w, walls[i].h);
-      wall->type = EntityType_Wall;
-      putchar('\n');
-    }
-  }
+  loadLevel(1);
+
 
   // init some text
   {
-    addText("HejsanSvejsan", {0, 0}, 0.10, true);
+    addText("HejsanSvejsan", {0, 0}, 0.10, {0.5,0.7,0.2,1}, true);
     // textSprites[0] = {rectAround({0, 0}, 2, 2), glyphs['m'].tex};
     // textSprites[1] = {rectAround({0, 0}, 2, 2), Rect{0, 0, 1024, 1024}};
   }
@@ -997,9 +1120,10 @@ int main(int, const char*[]) {
     glBufferData(GL_ARRAY_BUFFER, SPRITES_MAX*sizeof(Sprite), 0, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    const auto stride = 8 * sizeof(GLfloat);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, stride, (GLvoid*) 0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
 
     glOKORDIE;
@@ -1016,10 +1140,14 @@ int main(int, const char*[]) {
     glBufferData(GL_ARRAY_BUFFER, CHARACTERS_MAX*sizeof(Sprite), 0, GL_DYNAMIC_DRAW);
     glOKORDIE;
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) 0);
+    const auto stride = 12 * sizeof(GLfloat);
+    SDL_assert(sizeof(Character) == stride);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, stride, (GLvoid*) 0);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 8 * sizeof(GLfloat), (GLvoid*) (4 * sizeof(GLfloat)));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, (GLvoid*) (4 * sizeof(GLfloat)));
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride, (GLvoid*) (8 * sizeof(GLfloat)));
+    glEnableVertexAttribArray(2);
     glOKORDIE;
   }
 
@@ -1077,6 +1205,7 @@ int main(int, const char*[]) {
 
                 wasPressed[i] = !isDown[i];
                 isDown[i] = true;
+                break;
                 #ifdef DEBUG
                   if (wasPressed[i]) DEBUGLOG("A key was pressed\n");
                 #endif
@@ -1088,6 +1217,7 @@ int main(int, const char*[]) {
             for (int i = 0; i < KEY_MAX; ++i) {
               if (event.key.keysym.sym == keyCodes[i]) {
                 isDown[i] = false;
+                break;
               }
             }
           } break;
@@ -1102,36 +1232,33 @@ int main(int, const char*[]) {
       SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
     }
 
-    if (wasPressed[KEY_A]) {
-      if (player) {
-        remove(player);
-        player = 0;
-      } else {
-        const float w = 0.1, h = 0.1;
-        player = addEntity();
-        player->pos = {};
-        // TODO: get spritesheet info from external source
-        player->sprite = addSprite({rectAround(player->pos, w, h), Rect{11, 7, 70, 88}});
-        player->type = EntityType_Player;
-        player->hitBox = rectAround({}, w, h);
-        player->health = 10;
-      }
-    }
-
     // update entities
     FOR(iter, iterEntities()) {
       Entity* entity = get(iter);
 
+      // gravity
+      if (isset(entity, EntityFlag_Gravity)) {
+        entity->vel.y -= 0.02 * GRAVITY * dt;
+      }
+
       // per-type update
       switch (entity->type) {
+
         case EntityType_Player: {
+
           const float ACCELLERATION = 6;
-          const float GRAVITY = 12;
           const float JUMPPOWER = 10;
           const float DRAG = 0.90;
 
           // input movement
-          entity->vel.x += ACCELLERATION*dt*isDown[KEY_RIGHT] - ACCELLERATION*dt*isDown[KEY_LEFT];
+          if (isDown[KEY_RIGHT]) {
+            entity->vel += ACCELLERATION*dt;
+            entity->direction = 1;
+          } else if (isDown[KEY_LEFT]) {
+            entity->vel -= ACCELLERATION*dt;
+            entity->direction = -1;
+          }
+
           if (wasPressed[KEY_UP]) {
             entity->vel.y = JUMPPOWER;
           }
@@ -1139,8 +1266,30 @@ int main(int, const char*[]) {
           // physics movement
           entity->vel *= DRAG;
           entity->vel.y -= GRAVITY * dt;
+
+          // shoot a fairy (so to speak)
+          if (isDown[KEY_A]) {
+            for (int i = 0; i < 10; ++i) {
+              Entity* fairy = addEntity();
+              printf("created fairy");
+              if (fairy) {
+                auto pos = entity->pos;
+                fairy->pos = {pos.x, pos.y};
+                fairy->follow = player;
+                fairy->type = EntityType_Fairy;
+                fairy->hitBox = rectAround({}, 0.05, 0.05);
+                fairy->health = 5;
+                fairy->vel = vec2(entity->vel.x + entity->direction * 2.0f, entity->vel.y + frand(-1, 1));
+                set(fairy, EntityFlag_Gravity);
+                set(fairy, EntityFlag_NoCollide);
+              }
+            }
+          }
+
         } break;
+
         case EntityType_Fairy: {
+
           const float ACCELLERATION = 2.0f + frand(-2, 2);
           const float DRAG = 0.97;
           const float NOISE = 0.2;
@@ -1151,8 +1300,11 @@ int main(int, const char*[]) {
           }
           entity->vel *= DRAG;
         } break;
+
         case EntityType_Wall: {
         } break;
+
+        case EntityType_Max: break;
       };
 
       // collision
@@ -1240,23 +1392,41 @@ int main(int, const char*[]) {
 
           };
           popArr(Entity*, numHits);
-          SDL_assert(getCurrStackPos() == (void*) hits);
+          SDL_assert(stackCurr == (void*) hits);
         }
         entity->vel = move/dt;
       }
 
+      // and move according to collision
       vec2 move = entity->vel * dt;
       const float moveEpsilon = 0.001;
-      Sprite* sprite = get(entity->sprite);
       if (glm::abs(move.x) > moveEpsilon) {
         entity->pos.x += move.x;
-        sprite->screen.x += move.x;
       }
       if (glm::abs(move.y) > moveEpsilon) {
         entity->pos.y += move.y;
-        sprite->screen.y += move.y;
       }
     }
+
+    // draw entities
+    Sprite* sprite = sprites;
+    FOR(it, iterEntities()) {
+      Entity* e = get(it);
+      auto model = models[e->type];
+      switch (e->type) {
+        case EntityType_Player: {
+          *sprite++ = model->sprite + e->pos;
+        } break;
+        case EntityType_Fairy: {
+          *sprite++ = model->sprite + e->pos;
+        } break;
+        case EntityType_Wall: {
+          *sprite++ = {e->hitBox + e->pos, model->sprite.tex};
+        } break;
+        case EntityType_Max: break;
+      };
+    }
+    numSprites = sprite-sprites;
 
     // randomly add some text
     #ifdef DEBUG
@@ -1316,7 +1486,7 @@ int main(int, const char*[]) {
       glBindVertexArray(textVAO);
       glBindBuffer(GL_ARRAY_BUFFER, textVBO);
       if (textDirty) {
-        glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(Sprite), textSprites);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(textSprites[0]), textSprites);
       }
       glUniform2f(viewLocation, 0, 0);
       glDrawArrays(GL_POINTS, 0, (textSpritesMax - textSprites));
@@ -1327,11 +1497,9 @@ int main(int, const char*[]) {
 
     SDL_GL_SwapWindow(window);
 
-    #ifdef DEBUG
-      if (!(loopCount%100)) {
-        printf("%f fps\n", 1/dt);
-      }
-    #endif
+    if (!(loopCount%100)) {
+      printf("num Entities: %u\n", numEntities);
+      printf("%f fps\n", 1/dt);
+    }
   }
-
 }

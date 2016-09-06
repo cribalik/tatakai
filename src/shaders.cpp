@@ -76,13 +76,78 @@ const char* sprite_fragment_shader_src = R"(
   }
 )";
 
-const char* text_vertex_shader_src = sprite_vertex_shader_src;
-const char* text_geometry_shader_src = sprite_geometry_shader_src;
-const char* text_fragment_shader_src = R"(
+const char* text_vertex_shader_src = R"(
 
   #version 330 core
 
-  in vec2 texCoord;
+  layout (location = 0) in vec4 pos;
+  layout (location = 1) in vec4 texCoord;
+  layout (location = 2) in vec4 color;
+
+  out VERTEX_DATA {
+    vec4 texCoord;
+    vec4 color;
+  } myOutput;
+
+  uniform vec2 uView;
+
+  void main()
+  {
+    gl_Position = pos + vec4(uView, 0, 0);
+    myOutput.texCoord = texCoord;
+    myOutput.color = color;
+  }
+)";
+
+const char* text_geometry_shader_src = R"(
+  #version 330 core
+
+  layout (points) in;
+  layout (triangle_strip, max_vertices = 4) out;
+
+  in VERTEX_DATA {
+    vec4 texCoord;
+    vec4 color;
+  } myInput[];
+
+  out FRAGMENT_DATA {
+    vec2 texCoord;
+    vec4 color;
+  } myOutput;
+
+  void main() {
+    // we swap texture y coordinates here
+    vec2 texOrig = vec2(myInput[0].texCoord.x, myInput[0].texCoord.y + myInput[0].texCoord.w);
+    vec2 texSize = vec2(myInput[0].texCoord.z, -myInput[0].texCoord.w);
+
+    vec2 orig = gl_in[0].gl_Position.xy;
+    vec2 size = gl_in[0].gl_Position.zw;
+
+    myOutput.color = myInput[0].color;
+
+    gl_Position = vec4(orig, 0, 1);
+    myOutput.texCoord = texOrig;
+    EmitVertex();
+    gl_Position = vec4(orig + vec2(0, size.y), 0, 1);
+    myOutput.texCoord = texOrig + vec2(0, texSize.y);
+    EmitVertex();
+    gl_Position = vec4(orig + vec2(size.x, 0), 0, 1);
+    myOutput.texCoord = texOrig + vec2(texSize.x, 0);
+    EmitVertex();
+    gl_Position = vec4(orig + size, 0, 1);
+    myOutput.texCoord = texOrig + texSize;
+    EmitVertex();
+    EndPrimitive();
+  }
+)";
+
+const char* text_fragment_shader_src = R"(
+  #version 330 core
+
+  in FRAGMENT_DATA {
+    vec2 texCoord;
+    vec4 color;
+  } myInput;
 
   uniform sampler2D uTexture;
   uniform vec3 uAmbientLight;
@@ -91,8 +156,9 @@ const char* text_fragment_shader_src = R"(
 
   void main()
   {
-    float alpha = texture(uTexture, vec2(texCoord.x/1024, texCoord.y/1024)).r;
-    color = vec4(1, 1, 1, alpha);
+    float alpha = texture(uTexture, vec2(myInput.texCoord.x/1024, myInput.texCoord.y/1024)).r;
+    color = myInput.color;
+    color.a *= alpha;
   }
 )";
 
