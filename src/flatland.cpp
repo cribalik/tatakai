@@ -1057,7 +1057,7 @@ namespace {
           model->anim.delay = push(Block32);
           model->anim.numFrames = 8;
           for (uint i = 0; i < model->anim.numFrames; ++i) {
-            model->anim.delay->uints[i] = 100;
+            model->anim.delay->uints[i] = 200;
           }
           model->anim.cols = 4;
 
@@ -1098,7 +1098,7 @@ namespace {
     }
 
     // find the current frame
-    uint dt = time % delaySum;
+    uint dt = (getMilliseconds() - time) % delaySum;
     block = anim.delay;
     uint i = 0;
     for (; i < anim.numFrames; ++i) {
@@ -1108,7 +1108,7 @@ namespace {
       }
       dt -= block->uints[i&(Block32::NUM_UINTS-1)];
     }
-    SDL_assert(i < anim.numFrames-1);
+    SDL_assert(i < anim.numFrames);
 
     Rect texPos = {
       anim.texOrig.x + float(anim.texOrig.w*(i%anim.cols)),
@@ -1459,6 +1459,7 @@ int main(int, const char*[]) {
     }
 
     // draw entities
+    // TODO: split sprites into dynamic sprites and static sprites. The static can use the referenced sprite stuff and the dynamic will generate new sprites every new frame
     Sprite* sprite = sprites;
     FOR(it, iterEntities()) {
       Entity* e = get(it);
