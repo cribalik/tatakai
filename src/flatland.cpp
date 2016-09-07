@@ -117,6 +117,10 @@ namespace {
   inline float getDuration(Timer t) {
     return float(SDL_GetPerformanceCounter() - t)/SDL_GetPerformanceFrequency();
   }
+  uint currMilliseconds = 0;
+  inline uint getMilliseconds() {
+    return currMilliseconds;
+  }
 
   // Math
   struct Color {GLfloat r,g,b,a;};
@@ -157,6 +161,17 @@ namespace {
     return x;
   }
   #define multipleOf(a, b) (!((a)%(b)))
+  inline uint hammondWeight(uint x) {
+    uint result = 0;
+    while (x) {
+      result += x&1;
+      x >>= 1;
+    }
+    return result;
+  }
+  inline bool isPowerOfTwo(Uint64 x) {
+    return hammondWeight(x) == 1;
+  }
 
   // Physics
   struct Rect {
@@ -547,6 +562,7 @@ namespace {
   };
   struct Entity {
     Uint id; //TODO: should this be 64 bit to minimize odds of a reference to a wraparound id?
+    Uint timestamp;
     EntityType type;
     EntityFlag flags;
 
@@ -601,6 +617,7 @@ namespace {
       slot->used = true;
       slot->entity = {};
       slot->entity.id = entityId++;
+      slot->entity.timestamp = getMilliseconds();
       result = &slot->entity;
     }
     return result;
@@ -671,6 +688,7 @@ namespace {
       Uint32 uints[8];
     };
     Block32* next;
+    const static uint NUM_UINTS = arrsize(uints);
   };
   const Uint STACK_MAX = MegaBytes(128);
   Byte stack[STACK_MAX];
@@ -1038,8 +1056,8 @@ namespace {
           model->anim.texOrig = Recti{11,7,70,88};
           model->anim.delay = push(Block32);
           model->anim.numFrames = 8;
-          for (int i = 0; i < model->anim.numFrames; ++i) {
-            model->anim.delay[i] = 100;
+          for (uint i = 0; i < model->anim.numFrames; ++i) {
+            model->anim.delay->uints[i] = 100;
           }
           model->anim.cols = 4;
 
@@ -1067,6 +1085,38 @@ namespace {
       }
       models[type] = model;
     }
+  }
+  Sprite getSprite(uint time , SpriteAnim anim) {
+    // calculate sum of delays
+    // TODO: cache this value?
+    uint delaySum = 0;
+    SDL_assert(isPowerOfTwo(Block32::NUM_UINTS));
+    Block32* block = anim.delay;
+    for (uint i = 0; i < anim.numFrames; ++i) {
+      if (i&Block32::NUM_UINTS) block = block->next;
+      delaySum += block->uints[i&(Block32::NUM_UINTS-1)];
+    }
+
+    // find the current frame
+    uint dt = time % delaySum;
+    block = anim.delay;
+    uint i = 0;
+    for (; i < anim.numFrames; ++i) {
+      if (i&Block32::NUM_UINTS) block = block->next;
+      if (dt < block->uints[i&(Block32::NUM_UINTS-1)]) {
+        break;
+      }
+      dt -= block->uints[i&(Block32::NUM_UINTS-1)];
+    }
+    SDL_assert(i < anim.numFrames-1);
+
+    Rect texPos = {
+      anim.texOrig.x + float(anim.texOrig.w*(i%anim.cols)),
+      anim.texOrig.y + float(anim.texOrig.h*(i/anim.cols)),
+      (float) anim.texOrig.w,
+      (float) anim.texOrig.h,
+    };
+    return Sprite{anim.modelTransform, texPos};
   }
 };
 
@@ -1183,7 +1233,7 @@ int main(int, const char*[]) {
   int loopCount = 0;
   while (true)
   {
-
+    currMilliseconds = SDL_GetTicks();
     ++loopCount;
     float dt = getDuration(loopTime);
     loopTime = startTimer();
@@ -1415,7 +1465,7 @@ int main(int, const char*[]) {
       auto model = models[e->type];
       switch (e->type) {
         case EntityType_Player: {
-          *sprite++ = model->sprite + e->pos;
+          *sprite++ = getSprite(e->timestamp, model->anim) + e->pos;
         } break;
         case EntityType_Fairy: {
           *sprite++ = model->sprite + e->pos;
