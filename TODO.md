@@ -1,4 +1,5 @@
- * Spritesheet animationer
+ * Fixa så att animationer alltid börjar på rätt ställe (vilket innebär att animation behöver hålla state och kan inte bara spela utifrån varje Entities tidsstämpel :()
+   Man skulle kunna ha animationer som inte är menade att loopa att kunna bara läsa från tidssstämpel, men allt annat blir svårt att göra utan state.
  * Flera spelare
  * Skilj på kollision med väggar och andra entities för optimering
  * 3D support

@@ -11,63 +11,58 @@
 #define STB_RECT_PACK_IMPLEMENTATION 1
 #include <stb_rect_pack.h>
 
-// #define DEBUG
-#define DEBUG_FONT
-
-typedef unsigned char Byte;
-
-void _glOkOrDie(const char* file, int line) {
-  GLenum errorCode = glGetError();
-  if (errorCode != GL_NO_ERROR) {
-    const char* error;
-    switch (errorCode)
-    {
-      case GL_INVALID_ENUM:                  error = "INVALID_ENUM"; break;
-      case GL_INVALID_VALUE:                 error = "INVALID_VALUE"; break;
-      case GL_INVALID_OPERATION:             error = "INVALID_OPERATION"; break;
-      case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW"; break;
-      case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW"; break;
-      case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY"; break;
-      case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
-      default: error = "unknown error";
-    };
-    printf("GL error at %s:%u. Code: %u - %s\n", file, line, errorCode, error);
-    exit(1);
-  }
-}
-
-#ifdef DEBUG
-  #define DEBUGLOG(...) printf(__VA_ARGS__)
-#else
-  #define DEBUGLOG(...)
-#endif
-
-#if RELEASE
-  #define glOKORDIE
-#else
-  #define glOKORDIE _glOkOrDie(__FILE__, __LINE__)
-#endif
-
-#define FOR(it, start) for (auto it = start; it; next(&it))
-#define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
-#define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
-
-typedef unsigned int Uint;
-typedef unsigned char Byte;
-#define MegaBytes(x) ((x)*1024LL*1024LL)
-#define local_persist static
-#define unimplemented printf("unimplemented method %s:%u\n", __FILE__, __LINE__)
-
-
 namespace {
 
-  #include "shaders.cpp"
+  // Debug stuff
+  #ifdef DEBUG
+    #define DEBUGLOG(...) printf(__VA_ARGS__)
+  #else
+    #define DEBUGLOG(...)
+  #endif
 
+  // #define DEBUG
+  #define DEBUG_FONT
+
+  #if RELEASE
+    #define glOKORDIE
+  #else
+    #define glOKORDIE _glOkOrDie(__FILE__, __LINE__)
+  #endif
+
+  void _glOkOrDie(const char* file, int line) {
+    GLenum errorCode = glGetError();
+    if (errorCode != GL_NO_ERROR) {
+      const char* error;
+      switch (errorCode)
+      {
+        case GL_INVALID_ENUM:                  error = "INVALID_ENUM"; break;
+        case GL_INVALID_VALUE:                 error = "INVALID_VALUE"; break;
+        case GL_INVALID_OPERATION:             error = "INVALID_OPERATION"; break;
+        case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW"; break;
+        case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW"; break;
+        case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY"; break;
+        case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
+        default: error = "unknown error";
+      };
+      printf("GL error at %s:%u. Code: %u - %s\n", file, line, errorCode, error);
+      exit(1);
+    }
+  }
+
+  // constants & typedef
+  #include "shaders.cpp"
+  float GRAVITY = 12;
   using glm::vec2;
   using glm::vec3;
-
-  // constants
-  float GRAVITY = 12;
+  typedef unsigned char Byte;
+  #define FOR(it, start) for (auto it = start; it; next(&it))
+  #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
+  #define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
+  typedef unsigned int Uint;
+  typedef unsigned char Byte;
+  #define MegaBytes(x) ((x)*1024LL*1024LL)
+  #define local_persist static
+  #define unimplemented printf("unimplemented method %s:%u\n", __FILE__, __LINE__)
 
   // Init
   int screen_w = 800;
@@ -543,7 +538,58 @@ namespace {
   // Colors
   vec3 FIRE = {226/265.0f, 120/265.0f, 34/265.0f};
 
+  // memory
+  // random state for a model
+  struct Model;
+  struct ModelState {
+    Model* model;
+    // timestamp for sprite animation
+    uint timestamp;
+    // TODO: can have skeleton stuff here
+  };
+  struct Block32 {
+    union {
+      Uint32 uints[8];
+      ModelState modelState;
+    };
+    Block32* next;
+    const static uint NUM_UINTS = arrsize(uints);
+  };
+  Block32* freeBlock32 = 0;
+  // invalidates pointers
+  void free(Block32* block) {
+    block->next = freeBlock32;
+    freeBlock32 = block;
+  }
+  const Uint STACK_MAX = MegaBytes(128);
+  Byte stack[STACK_MAX];
+  Byte* stackCurr = stack;
+  inline void* pushBlock(Uint size) {
+    SDL_assert(stackCurr + size < stack + STACK_MAX);
+    stackCurr += size;
+    return stackCurr-size;
+  }
+  inline void popBlock(Uint size) {
+    SDL_assert(stackCurr - size >= stack);
+    stackCurr -= size;
+  }
+  #define push(type) (type*) pushBlock(sizeof(type))
+  #define pushArr(type, count) (type*) pushBlock(sizeof(type)*count)
+  #define pop(type) popBlock(sizeof(type))
+  #define popArr(type, count) popBlock(sizeof(type)*count)
+  struct String {uint n; const char* str;};
+  String pushStr(const char* fmt, ...) {
+    va_list(args);
+    va_start(args, fmt);
+    const char* result = (const char*) stackCurr;
+    uint n = vsprintf((char*) stackCurr, fmt, args);
+    pushArr(char, n);
+    return String{n, result};
+  }
+  inline void popStr(String s) {popBlock(s.n);}
+
   // Entities
+  // TODO: dynamic allocation of entities (by linked list of blocks) instead of a static block?
   enum EntityType : Uint32 {
     EntityType_Player,
     EntityType_Fairy,
@@ -560,6 +606,26 @@ namespace {
     Uint id;
     Entity* entity;
   };
+  struct SpriteAnim {
+    Rect modelTransform;
+    Recti texOrig;
+    Block32* delay;
+    uint numFrames;
+    uint cols;
+    uint timestamp;
+  };
+  enum ModelType {
+    ModelType_Sprite,
+    ModelType_Anim,
+  };
+  struct Model {
+    ModelType type;
+    union {
+      Sprite sprite;
+      SpriteAnim anim;
+    };
+    Model* next;
+  };
   struct Entity {
     Uint id; //TODO: should this be 64 bit to minimize odds of a reference to a wraparound id?
     Uint timestamp;
@@ -568,6 +634,9 @@ namespace {
 
     vec2 pos;
     vec2 vel;
+
+    Model* models;
+
     // SpriteRef sprite;
     float width, height;
     Rect hitBox;
@@ -599,7 +668,7 @@ namespace {
   Uint numEntities = 0;
   EntitySlot* freeEntities = 0;
   Uint entityId = 0;
-  // FIXME: Se use only an entity id to check if references are outdated. This can wrap around, allowing for errors :(
+  // FIXME: We use only an entity id to check if references are outdated. This can wrap around, allowing for errors :(
   EntitySlot entities[ENTITIES_MAX] = {};
   Entity* addEntity() {
     EntitySlot* slot = 0;
@@ -617,7 +686,7 @@ namespace {
       slot->used = true;
       slot->entity = {};
       slot->entity.id = entityId++;
-      slot->entity.timestamp = getMilliseconds();
+      slot->entity.timestamp = currMilliseconds;
       result = &slot->entity;
     }
     return result;
@@ -662,13 +731,13 @@ namespace {
   };
   // Iterate entities
   typedef EntitySlot* EntityIter;
-  void next(EntityIter* iter) {
-    SDL_assert((*iter) >= entities && (*iter) < entities+ENTITIES_MAX);
+  inline void next(EntityIter* iter) {
+    SDL_assert(*iter >= entities && *iter < entities+ENTITIES_MAX);
     do {
       ++(*iter);
-    } while (!(*iter)->used && (*iter) != entities+ENTITIES_MAX);
-    if ((*iter) == entities + ENTITIES_MAX) {
-      (*iter) = 0;
+    } while (!(*iter)->used && *iter != entities+ENTITIES_MAX);
+    if (*iter == entities + ENTITIES_MAX) {
+      *iter = 0;
     }
   }
   EntityIter iterEntities() {
@@ -681,39 +750,6 @@ namespace {
     SDL_assert(iter->used);
     return &iter->entity;
   }
-
-  // memory
-  struct Block32 {
-    union {
-      Uint32 uints[8];
-    };
-    Block32* next;
-    const static uint NUM_UINTS = arrsize(uints);
-  };
-  const Uint STACK_MAX = MegaBytes(128);
-  Byte stack[STACK_MAX];
-  Byte* stackCurr = stack;
-  inline void* _push(Uint size) {
-    SDL_assert(stackCurr + size < stack + STACK_MAX);
-    stackCurr += size;
-    return stackCurr-size;
-  }
-  inline void _pop(Uint size) {
-    SDL_assert(stackCurr - size >= stack);
-    stackCurr -= size;
-  }
-  #define push(type) (type*) _push(sizeof(type))
-  #define pushArr(type, count) (type*) _push(sizeof(type)*count)
-  #define pop(type) _pop(sizeof(type))
-  #define popArr(type, count) _pop(sizeof(type)*count)
-  int pushStr(const char* fmt, ...) {
-    va_list(args);
-    va_start(args, fmt);
-    int n = vsprintf((char*) stackCurr, fmt, args);
-    pushArr(char, n);
-    return n;
-  }
-  #define popStr _pop
 
   // openGL
   GLuint compileShader(const char* vertexShaderSrc, const char* geometryShaderSrc, const char* fragmentShaderSrc) {
@@ -939,37 +975,6 @@ namespace {
     print(" - ", s.tex);
   }
 
-  // Levels
-  // basically loads in a bunch of walls
-  void loadLevel(uint i) {
-    char* filename = (char*) stackCurr;
-    int n = pushStr("assets/%u.lvl", i);
-    DEBUGLOG("Opening level file %s", filename);
-    auto f = fopen(filename, "r");
-    if (f) {
-      while (1) {
-        Rect r;
-        int res = fscanf(f, "%f%f%f%f", &r.x,&r.y,&r.w,&r.h);
-        if (res && res != EOF) {
-          Entity* e = addEntity();
-          if (e) {
-            e->pos = center(r);
-            e->type = EntityType_Wall;
-            e->hitBox = rectAround({}, r.w, r.h);
-          } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate entity while loading level");
-          }
-        } else {
-          break;
-        }
-      }
-      fclose(f);
-    } else {
-      SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to open level file \"%s\"\n", filename);
-    }
-    popStr(n);
-  }
-
   // Gameplay
   // Check if a and b has types at and bt, and swaps a and b if needed so that a->type == at and b->type == bt
   inline bool checkTypeAndSwap(Entity** a, Entity** b, EntityType at, EntityType bt) {
@@ -1020,73 +1025,68 @@ namespace {
   }
 
   // visual models
-  struct SpriteAnim {
-    Rect modelTransform;
-    Recti texOrig;
-    Block32* delay;
-    uint numFrames;
-    uint cols;
-  };
-  enum ModelType {
-    ModelType_Sprite,
-    ModelType_Anim,
-  };
-  struct Model {
-    ModelType type;
-    union {
-      Sprite sprite;
-      SpriteAnim anim;
-    };
-    Model* next;
-  };
+  // TODO: separate sprite animations from static sprites
+  // TODO: Separate out per-model state (like the timestamp for the sprite animation) and common animation information (like frame delay times, texture positions etc.) ?
   // TODO: extend models to be graphs of animation transitions
-  Model* models[EntityType_Max] = {};
-  void loadModel(EntityType type) {
-    // TODO: get this stuff from file
-    if (!models[type]) {
-      Model* model = 0;
-      switch (type) {
+  Model* freeModels = 0;
+  Model* loadModels(Entity* e) {
+    // TODO: cache model and get from file otherwise
+    Model* model = 0;
+    switch (e->type) {
 
-        case EntityType_Player: {
+      case EntityType_Player: {
 
-          model = push(Model);
-          *model = {};
-          model->type = ModelType_Anim;
-          model->anim.modelTransform = rectAround({}, 0.1 ,0.1);
-          model->anim.texOrig = Recti{11,7,70,88};
-          model->anim.delay = push(Block32);
-          model->anim.numFrames = 8;
-          for (uint i = 0; i < model->anim.numFrames; ++i) {
-            model->anim.delay->uints[i] = 200;
-          }
-          model->anim.cols = 4;
+        model = push(Model);
+        *model = {};
+        model->type = ModelType_Anim;
+        model->anim.modelTransform = rectAround({}, 0.1 ,0.1);
+        model->anim.texOrig = Recti{11,7,70,88};
+        model->anim.delay = push(Block32);
+        model->anim.numFrames = 8;
+        for (uint i = 0; i < model->anim.numFrames; ++i) {
+          model->anim.delay->uints[i] = 200;
+        }
+        model->anim.cols = 4;
+        SDL_assert(model->next == 0);
 
-        } break;
+      } break;
 
-        case EntityType_Fairy: {
+      case EntityType_Fairy: {
 
-          model = push(Model);
-          *model = {};
-          model->type = ModelType_Sprite;
-          model->sprite = {rectAround({}, 0.1, 0.1), Rect{0, 282, 142, 142}};
+        model = push(Model);
+        *model = {};
+        model->type = ModelType_Sprite;
+        model->sprite = {rectAround({}, 0.1, 0.1), Rect{0, 282, 142, 142}};
+        SDL_assert(model->next == 0);
 
-        } break;
+      } break;
 
-        case EntityType_Wall: {
+      case EntityType_Wall: {
 
-          model = push(Model);
-          *model = {};
-          model->type = ModelType_Sprite;
-          model->sprite = {Rect{}, Rect{0, 282, 142, 142}};
+        model = push(Model);
+        *model = {};
+        model->type = ModelType_Sprite;
+        model->sprite = {e->hitBox, Rect{0, 282, 142, 142}};
+        SDL_assert(model->next == 0);
 
-        } break;
+      } break;
 
-        case EntityType_Max: break;
+      case EntityType_Max: break;
+    }
+    return model;
+  }
+  void free(Model* model) {
+    while (model) {
+      if (model->type == ModelType_Anim) {
+        free(model->anim.delay);
       }
-      models[type] = model;
+      auto tmp = model;
+      model = model->next;
+      tmp->next = freeModels;
+      freeModels = tmp;
     }
   }
-  Sprite getSprite(uint time , SpriteAnim anim) {
+  Sprite getSprite(SpriteAnim anim) {
     // calculate sum of delays
     // TODO: cache this value?
     uint delaySum = 0;
@@ -1098,7 +1098,7 @@ namespace {
     }
 
     // find the current frame
-    uint dt = (getMilliseconds() - time) % delaySum;
+    uint dt = (currMilliseconds - anim.timestamp) % delaySum;
     block = anim.delay;
     uint i = 0;
     for (; i < anim.numFrames; ++i) {
@@ -1118,6 +1118,53 @@ namespace {
     };
     return Sprite{anim.modelTransform, texPos};
   }
+  Sprite getSprite(Model* model) {
+    Sprite result = {};
+    switch (model->type) {
+      case ModelType_Anim: {
+        result = getSprite(model->anim);
+      } break;
+      case ModelType_Sprite: {
+        result = model->sprite;
+      } break;
+    }
+    return result;
+  }
+
+  // Levels
+  // basically loads in a bunch of walls
+  void loadLevel(uint i) {
+    String filename = pushStr("assets/%u.lvl", i)
+    DEBUGLOG("Opening level file %s", filename.str);
+    auto f = fopen(filename.str, "r");
+    if (f) {
+      popStr(filename);
+      while (1) {
+        Rect r;
+        int res = fscanf(f, "%f%f%f%f", &r.x,&r.y,&r.w,&r.h);
+        if (res && res != EOF) {
+          Entity* e = addEntity();
+          if (e) {
+            e->pos = center(r);
+            e->type = EntityType_Wall;
+            e->hitBox = rectAround({}, r.w, r.h);
+            e->models = loadModels(e);
+            e->models->sprite.w = r.w;
+            e->models->sprite.w = r.w;
+            SDL_assert(e->models->next == 0);
+          } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate entity while loading level");
+          }
+        } else {
+          break;
+        }
+      }
+      fclose(f);
+    } else {
+      SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to open level file \"%s\"\n", filename.str);
+      popStr(filename);
+    }
+  }
 };
 
 int main(int, const char*[]) {
@@ -1131,6 +1178,9 @@ int main(int, const char*[]) {
 
   GLuint fontTexture = initText();
 
+  // init level
+  loadLevel(1);
+
   // init player
   EntityRef player;
   {
@@ -1138,19 +1188,14 @@ int main(int, const char*[]) {
     Entity* playerP = addEntity();
     playerP->pos = {};
     // TODO: get spritesheet info from external source
+    // TODO: do we need to optimize memory so that shared sprite info is refactored out?
     // playerP->sprite = addSprite({rectAround(playerP->pos, w, h), Rect{11, 7, 70, 88}});
     playerP->type = EntityType_Player;
     playerP->hitBox = rectAround({}, w, h);
     playerP->health = 10;
+    playerP->models = loadModels(playerP);
     player = createRef(playerP);
   }
-
-  loadModel(EntityType_Player);
-  loadModel(EntityType_Fairy);
-  loadModel(EntityType_Wall);
-  // init level
-  loadLevel(1);
-
 
   // init some text
   {
@@ -1228,7 +1273,7 @@ int main(int, const char*[]) {
   // SDL_SetRelativeMouseMode(SDL_TRUE);
   // SDL_GetRelativeMouseState(0, 0);
 
-  // main loop
+  // #main loop
   Timer loopTime = startTimer();
   int loopCount = 0;
   while (true)
@@ -1282,7 +1327,7 @@ int main(int, const char*[]) {
       SDL_GetRelativeMouseState(&mouseDX, &mouseDY);
     }
 
-    // update entities
+    // #update entities
     FOR(iter, iterEntities()) {
       Entity* entity = get(iter);
 
@@ -1330,6 +1375,7 @@ int main(int, const char*[]) {
                 fairy->hitBox = rectAround({}, 0.05, 0.05);
                 fairy->health = 5;
                 fairy->vel = vec2(entity->vel.x + entity->direction * 2.0f, entity->vel.y + frand(-1, 1));
+                fairy->models = loadModels(fairy);
                 set(fairy, EntityFlag_Gravity);
                 set(fairy, EntityFlag_NoCollide);
               }
@@ -1458,26 +1504,20 @@ int main(int, const char*[]) {
       }
     }
 
-    // draw entities
-    // TODO: split sprites into dynamic sprites and static sprites. The static can use the referenced sprite stuff and the dynamic will generate new sprites every new frame
-    Sprite* sprite = sprites;
-    FOR(it, iterEntities()) {
-      Entity* e = get(it);
-      auto model = models[e->type];
-      switch (e->type) {
-        case EntityType_Player: {
-          *sprite++ = getSprite(e->timestamp, model->anim) + e->pos;
-        } break;
-        case EntityType_Fairy: {
-          *sprite++ = model->sprite + e->pos;
-        } break;
-        case EntityType_Wall: {
-          *sprite++ = {e->hitBox + e->pos, model->sprite.tex};
-        } break;
-        case EntityType_Max: break;
-      };
+    // draw entities. #render
+    // TODO: split sprites into dynamic sprites and static sprites. The static can use the static sprite buffer and the dynamic will generate new sprites every new frame in order to save bandwidth to GPU
+    {
+      Sprite* sprite = sprites;
+      FOR(it, iterEntities()) {
+        Entity* e = get(it);
+        Model* model = e->models;
+        while (model) {
+          *sprite++ = getSprite(model) + e->pos;
+          model = model->next;
+        }
+      }
+      numSprites = sprite-sprites;
     }
-    numSprites = sprite-sprites;
 
     // randomly add some text
     #ifdef DEBUG
@@ -1548,9 +1588,11 @@ int main(int, const char*[]) {
 
     SDL_GL_SwapWindow(window);
 
-    if (!(loopCount%100)) {
-      printf("num Entities: %u\n", numEntities);
-      printf("%f fps\n", 1/dt);
-    }
+    #ifdef DEBUG
+      if (!(loopCount%100)) {
+        printf("num Entities: %u\n", numEntities);
+        printf("%f fps\n", 1/dt);
+      }
+    #endif
   }
 }
