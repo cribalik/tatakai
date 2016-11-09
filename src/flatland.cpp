@@ -1,3 +1,4 @@
+#define GLEW_STATIC
 #include <GL/glew.h>
 #include <GL/gl.h>
 #include <SOIL/SOIL.h>
@@ -9,7 +10,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #define STB_RECT_PACK_IMPLEMENTATION 1
-#include <stb_rect_pack.h>
+#include <stb/stb_rect_pack.h>
 
 namespace {
 
@@ -19,6 +20,8 @@ namespace {
   #else
     #define DEBUGLOG(...)
   #endif
+
+  #define LOGERROR(msg, ...) SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s:%u: " msg, __FILE__, __LINE__, __VA_ARGS__)
 
   // #define DEBUG
   #define DEBUG_FONT
@@ -44,7 +47,7 @@ namespace {
         case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
         default: error = "unknown error";
       };
-      printf("GL error at %s:%u. Code: %u - %s\n", file, line, errorCode, error);
+      LOGERROR("GL error at %s:%u. Code: %u - %s\n", file, line, errorCode, error);
       exit(1);
     }
   }
@@ -59,6 +62,7 @@ namespace {
   #define arrsize(arr) (sizeof((arr))/sizeof(*(arr)))
   #define swap(a,b) {auto tmp = *a; *a = *b; *b = tmp;}
   typedef unsigned int Uint;
+  typedef Uint Bool;
   typedef unsigned char Byte;
   #define MegaBytes(x) ((x)*1024LL*1024LL)
   #define local_persist static
@@ -112,8 +116,8 @@ namespace {
   inline float getDuration(Timer t) {
     return float(SDL_GetPerformanceCounter() - t)/SDL_GetPerformanceFrequency();
   }
-  uint currMilliseconds = 0;
-  inline uint getMilliseconds() {
+  Uint currMilliseconds = 0;
+  inline Uint getMilliseconds() {
     return currMilliseconds;
   }
 
@@ -156,16 +160,8 @@ namespace {
     return x;
   }
   #define multipleOf(a, b) (!((a)%(b)))
-  inline uint hammondWeight(uint x) {
-    uint result = 0;
-    while (x) {
-      result += x&1;
-      x >>= 1;
-    }
-    return result;
-  }
   inline bool isPowerOfTwo(Uint64 x) {
-    return hammondWeight(x) == 1;
+    return (x & (x - 1)) == 0;
   }
 
   // Physics
@@ -230,7 +226,7 @@ namespace {
     float t;
   };
   RayCollisionAnswer rayCollision(Line ray, Line target) {
-    const float epsilon = 0.0001;
+    const float epsilon = 0.0001f;
     using namespace glm;
     RayCollisionAnswer result = {};
     auto r = ray.b - ray.a;
@@ -281,7 +277,7 @@ namespace {
         Rect _; // texture
         struct { // Allocator information for texts
           Character* next;
-          uint size;
+          Uint size;
         };
       };
       struct {
@@ -318,7 +314,7 @@ namespace {
   struct TextRef {
     // TODO: squish together these bits?
     Character* block;
-    uint size;
+    Uint size;
   };
   inline bool isnull(TextRef ref) {return !ref.block;}
   // text can only have one parent, multiple frees are not supported
@@ -327,7 +323,7 @@ namespace {
     SDL_assert(text);
     if (!text) return result;
 
-    uint len = strlen(text);
+    Uint len = strlen(text);
     // find large enough block (first fit)
     // TODO: best fit?
     Character** p = &freeChars;
@@ -368,7 +364,7 @@ namespace {
       // fill the sprites
       Character* bucket = block;
       for (const char* c = text; *c; ++c, ++bucket) {
-        uint i = *c;
+        Uint i = *c;
         *bucket = Character{
           Rect{
             pos.x + glyphs[i].dim.x * scale,
@@ -399,7 +395,7 @@ namespace {
         printf("Removed text block at %li of size %u", ref.block - textSprites, ref.size);
       #endif
       // hide the removed sprites
-      for (uint i = 0; i < ref.size; ++i) {
+      for (Uint i = 0; i < ref.size; ++i) {
         ref.block[i].sprite.screen = invalidSpritePos();
       }
       // free block
@@ -456,10 +452,10 @@ namespace {
       #endif
     }
   }
-  GLuint loadFont(const char* filename, uint height);
+  GLuint loadFont(const char* filename, Uint height);
   GLuint initText() {
     GLuint result = loadFont("assets/monaco.ttf", 48);
-    for (uint i = 0; i < CHARACTERS_MAX; ++i) {
+    for (Uint i = 0; i < CHARACTERS_MAX; ++i) {
       textSprites[i].sprite.screen = invalidSpritePos();
     }
     freeChars = textSprites;
@@ -478,7 +474,7 @@ namespace {
   };
   typedef SpriteRefSlot* SpriteRef;
   SpriteRefSlot* freeSpriteRefs = 0;
-  uint numSpriteRefs = 0;
+  Uint numSpriteRefs = 0;
   SpriteRefSlot spriteReferences[SPRITES_MAX]; // TODO: use hashmap instead?
   SpriteRefSlot* spriteReferenceLocation[SPRITES_MAX];
   SpriteRef addSprite(Sprite s) {
@@ -515,7 +511,7 @@ namespace {
   inline void free(SpriteRef ref) { // invalidates references to this sprite
     SDL_assert(ref->sprite >= sprites && ref->sprite < sprites + SPRITES_MAX);
     // swap sprite data with the last one
-    uint index = ref->sprite - sprites;
+    Uint index = ref->sprite - sprites;
     sprites[index] = sprites[--numSprites];
     // redirect the reference for the last one
     SpriteRefSlot* slot = spriteReferenceLocation[numSprites];
@@ -544,16 +540,17 @@ namespace {
   struct ModelState {
     Model* model;
     // timestamp for sprite animation
-    uint timestamp;
+    Uint timestamp;
     // TODO: can have skeleton stuff here
   };
   struct Block32 {
+    const static Uint NUM_UINTS = 8;
     union {
-      Uint32 uints[8];
+      Uint32 Uints[NUM_UINTS];
       ModelState modelState;
     };
     Block32* next;
-    const static uint NUM_UINTS = arrsize(uints);
+
   };
   Block32* freeBlock32 = 0;
   // invalidates pointers
@@ -577,12 +574,12 @@ namespace {
   #define pushArr(type, count) (type*) pushBlock(sizeof(type)*count)
   #define pop(type) popBlock(sizeof(type))
   #define popArr(type, count) popBlock(sizeof(type)*count)
-  struct String {uint n; const char* str;};
+  struct String {Uint n; const char* str;};
   String pushStr(const char* fmt, ...) {
     va_list(args);
     va_start(args, fmt);
     const char* result = (const char*) stackCurr;
-    uint n = vsprintf((char*) stackCurr, fmt, args);
+    Uint n = vsprintf((char*) stackCurr, fmt, args);
     pushArr(char, n);
     return String{n, result};
   }
@@ -610,9 +607,9 @@ namespace {
     Rect modelTransform;
     Recti texOrig;
     Block32* delay;
-    uint numFrames;
-    uint cols;
-    uint timestamp;
+    Uint numFrames;
+    Uint cols;
+    Uint timestamp;
   };
   enum ModelType {
     ModelType_Sprite,
@@ -648,7 +645,7 @@ namespace {
     char direction; // -1 left, 1 right
     Uint health;
   };
-  inline bool isset(Entity* e, EntityFlag flag) {
+  inline Bool isset(Entity* e, EntityFlag flag) {
     return e->flags & flag;
   }
   inline void set(Entity* e, EntityFlag flag) {
@@ -663,6 +660,7 @@ namespace {
       Entity entity;
       EntitySlot* next;
     };
+    EntitySlot() {};
   };
   const Uint ENTITIES_MAX = 8192;
   Uint numEntities = 0;
@@ -838,7 +836,7 @@ namespace {
   // Fonts
   const char START_CHAR = 32;
   const char END_CHAR = 127;
-  GLuint loadFont(const char* filename, uint height) {
+  GLuint loadFont(const char* filename, Uint height) {
 
     // load font file
     FT_Face face;
@@ -851,7 +849,7 @@ namespace {
     // pack glyphs
     const int pad = 2;
     stbrp_rect rects[END_CHAR-START_CHAR];
-    for (uint i = START_CHAR; i < END_CHAR; ++i) {
+    for (Uint i = START_CHAR; i < END_CHAR; ++i) {
       if (FT_Load_Char(face, i, FT_LOAD_RENDER)) {
         printf("failed to load char %c\n", i);
         continue;
@@ -866,14 +864,14 @@ namespace {
     stbrp_pack_rects(&c, rects, arrsize(rects));
 
     // get the max width and height
-    Uint maxW = 0, maxH = 0;
+    int maxW = 0, maxH = 0;
     for (stbrp_rect* r = rects; r < rects+arrsize(rects); ++r) {
       SDL_assert(r->was_packed);
       if (!r->was_packed) {
         puts("Failed to pack font");
       }
-      maxW = glm::max((uint) r->x + r->w, maxW);
-      maxH = glm::max((uint) r->y + r->h, maxW);
+      maxW = glm::max(r->x + r->w, maxW);
+      maxH = glm::max(r->y + r->h, maxW);
     }
     maxW = nextPowerOfTwo(maxW);
     maxH = nextPowerOfTwo(maxH);
@@ -884,7 +882,7 @@ namespace {
     // check if opengl support that size of texture
     GLint maxTextureSize;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-    SDL_assert((Uint) maxTextureSize >= maxW && (Uint) maxTextureSize >= maxH);
+    SDL_assert(maxTextureSize >= maxW && maxTextureSize >= maxH);
     printf("%u %u %u\n", maxTextureSize, maxW, maxH);
 
     // create texture
@@ -909,9 +907,9 @@ namespace {
 
       #ifdef DEBUG_FONT
         unsigned char* c = face->glyph->bitmap.buffer;
-        for (uint i = 0; i < face->glyph->bitmap.width; ++i) {
+        for (int i = 0; i < face->glyph->bitmap.width; ++i) {
           auto p = c;
-          for (uint j = 0; j < face->glyph->bitmap.rows; ++j) {
+          for (int j = 0; j < face->glyph->bitmap.rows; ++j) {
             ++p;
           }
           c += face->glyph->bitmap.pitch;
@@ -928,7 +926,7 @@ namespace {
       // save glyph offsets
       int w = face->glyph->bitmap.width;
       int h = face->glyph->bitmap.rows;
-      float fheight = height;
+      float fheight = float(height);
       #ifdef DEBUG_FONT
       printf("%c: bx: %i by: %i h: %i w: %i advx: %li advy: %li\n", i, face->glyph->bitmap_left, face->glyph->bitmap_top, h, w, face->glyph->advance.x, face->glyph->advance.y);
       #endif
@@ -1039,12 +1037,12 @@ namespace {
         model = push(Model);
         *model = {};
         model->type = ModelType_Anim;
-        model->anim.modelTransform = rectAround({}, 0.1 ,0.1);
+        model->anim.modelTransform = rectAround({}, 0.1f, 0.1f);
         model->anim.texOrig = Recti{11,7,70,88};
         model->anim.delay = push(Block32);
         model->anim.numFrames = 8;
-        for (uint i = 0; i < model->anim.numFrames; ++i) {
-          model->anim.delay->uints[i] = 200;
+        for (Uint i = 0; i < model->anim.numFrames; ++i) {
+          model->anim.delay->Uints[i] = 200;
         }
         model->anim.cols = 4;
         SDL_assert(model->next == 0);
@@ -1056,7 +1054,7 @@ namespace {
         model = push(Model);
         *model = {};
         model->type = ModelType_Sprite;
-        model->sprite = {rectAround({}, 0.1, 0.1), Rect{0, 282, 142, 142}};
+        model->sprite = {rectAround({}, 0.1f, 0.1f), Rect{0, 282, 142, 142}};
         SDL_assert(model->next == 0);
 
       } break;
@@ -1089,24 +1087,24 @@ namespace {
   Sprite getSprite(SpriteAnim anim) {
     // calculate sum of delays
     // TODO: cache this value?
-    uint delaySum = 0;
+    Uint delaySum = 0;
     SDL_assert(isPowerOfTwo(Block32::NUM_UINTS));
     Block32* block = anim.delay;
-    for (uint i = 0; i < anim.numFrames; ++i) {
+    for (Uint i = 0; i < anim.numFrames; ++i) {
       if (i&Block32::NUM_UINTS) block = block->next;
-      delaySum += block->uints[i&(Block32::NUM_UINTS-1)];
+      delaySum += block->Uints[i&(Block32::NUM_UINTS-1)];
     }
 
     // find the current frame
-    uint dt = (currMilliseconds - anim.timestamp) % delaySum;
+    Uint dt = (currMilliseconds - anim.timestamp) % delaySum;
     block = anim.delay;
-    uint i = 0;
+    Uint i = 0;
     for (; i < anim.numFrames; ++i) {
       if (i&Block32::NUM_UINTS) block = block->next;
-      if (dt < block->uints[i&(Block32::NUM_UINTS-1)]) {
+      if (dt < block->Uints[i&(Block32::NUM_UINTS-1)]) {
         break;
       }
-      dt -= block->uints[i&(Block32::NUM_UINTS-1)];
+      dt -= block->Uints[i&(Block32::NUM_UINTS-1)];
     }
     SDL_assert(i < anim.numFrames);
 
@@ -1133,7 +1131,7 @@ namespace {
 
   // Levels
   // basically loads in a bunch of walls
-  void loadLevel(uint i) {
+  void loadLevel(Uint i) {
     String filename = pushStr("assets/%u.lvl", i)
     DEBUGLOG("Opening level file %s", filename.str);
     auto f = fopen(filename.str, "r");
@@ -1167,9 +1165,9 @@ namespace {
   }
 };
 
-int main(int, const char*[]) {
+int main(int, char*[]) {
   #ifndef DEBUG
-    srand(SDL_GetPerformanceCounter());
+    srand((Uint) SDL_GetPerformanceCounter());
   #endif
   SDL_Window* window = initSubSystems();
   SDL_assert(tests());
@@ -1184,7 +1182,7 @@ int main(int, const char*[]) {
   // init player
   EntityRef player;
   {
-    const float w = 0.1, h = 0.1;
+    const float w = 0.1f, h = 0.1f;
     Entity* playerP = addEntity();
     playerP->pos = {};
     // TODO: get spritesheet info from external source
@@ -1199,7 +1197,7 @@ int main(int, const char*[]) {
 
   // init some text
   {
-    addText("HejsanSvejsan", {0, 0}, 0.10, {0.5,0.7,0.2,1}, true);
+    addText("HejsanSvejsan", {0, 0}, 0.10f, {0.5f,0.7f,0.2f,1.0f}, true);
     // textSprites[0] = {rectAround({0, 0}, 2, 2), glyphs['m'].tex};
     // textSprites[1] = {rectAround({0, 0}, 2, 2), Rect{0, 0, 1024, 1024}};
   }
@@ -1249,6 +1247,7 @@ int main(int, const char*[]) {
   // compile shaders and set static uniforms
   GLuint spriteShader;
   GLint viewLocation;
+  GLint textViewLocation;
   GLuint spriteSheet;
   GLuint textShader;
   {
@@ -1267,7 +1266,10 @@ int main(int, const char*[]) {
     GLuint ambientLightLocation = glGetUniformLocation(spriteShader, "uAmbientLight");
     glUniform3f(ambientLightLocation, 1, 1, 1);
     glOKORDIE;
+
     textShader = compileShader(text_vertex_shader_src, text_geometry_shader_src, text_fragment_shader_src);
+    textViewLocation = glGetUniformLocation(textShader, "uView");
+    glOKORDIE;
   }
 
   // SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -1333,7 +1335,7 @@ int main(int, const char*[]) {
 
       // gravity
       if (isset(entity, EntityFlag_Gravity)) {
-        entity->vel.y -= 0.02 * GRAVITY * dt;
+        entity->vel.y -= 0.02f * GRAVITY * dt;
       }
 
       // per-type update
@@ -1343,7 +1345,7 @@ int main(int, const char*[]) {
 
           const float ACCELLERATION = 6;
           const float JUMPPOWER = 10;
-          const float DRAG = 0.90;
+          const float DRAG = 0.90f;
 
           // input movement
           if (isDown[KEY_RIGHT]) {
@@ -1372,7 +1374,7 @@ int main(int, const char*[]) {
                 fairy->pos = {pos.x, pos.y};
                 fairy->follow = player;
                 fairy->type = EntityType_Fairy;
-                fairy->hitBox = rectAround({}, 0.05, 0.05);
+                fairy->hitBox = rectAround({}, 0.05f, 0.05f);
                 fairy->health = 5;
                 fairy->vel = vec2(entity->vel.x + entity->direction * 2.0f, entity->vel.y + frand(-1, 1));
                 fairy->models = loadModels(fairy);
@@ -1387,8 +1389,8 @@ int main(int, const char*[]) {
         case EntityType_Fairy: {
 
           const float ACCELLERATION = 2.0f + frand(-2, 2);
-          const float DRAG = 0.97;
-          const float NOISE = 0.2;
+          const float DRAG = 0.97f;
+          const float NOISE = 0.2f;
           Entity* target = get(entity->follow);
           if (target) {
             vec2 diff = target->pos - entity->pos + v2rand(NOISE);
@@ -1456,7 +1458,7 @@ int main(int, const char*[]) {
               for (Uint l = 0; l < arrsize(lines); ++l) {
                 RayCollisionAnswer r = rayCollision(Line{oldPos, endPoint}, lines[l]);
                 if (r.hit && r.t < t) {
-                  const float epsilon = 0.001;
+                  const float epsilon = 0.001f;
                   t = glm::max(0.0f, r.t-epsilon);
                   hit = targetPtr;
                   closestWall = line2vector(lines[l]);
@@ -1495,7 +1497,7 @@ int main(int, const char*[]) {
 
       // and move according to collision
       vec2 move = entity->vel * dt;
-      const float moveEpsilon = 0.001;
+      const float moveEpsilon = 0.001f;
       if (glm::abs(move.x) > moveEpsilon) {
         entity->pos.x += move.x;
       }
@@ -1522,7 +1524,7 @@ int main(int, const char*[]) {
     // randomly add some text
     #ifdef DEBUG
       local_persist TextRef texts[512];
-      local_persist uint numTexts = 0;
+      local_persist Uint numTexts = 0;
       if (multipleOf(rand(), 2) && numTexts < 512) {
         // add text
         char* text = (char*) stackCurr;
@@ -1532,7 +1534,7 @@ int main(int, const char*[]) {
         popArr(int, n);
       } else if (numTexts == 512 || (multipleOf(rand(), 70) && numTexts > 0)) {
         // remove text
-        uint i = uint(rand())%numTexts;
+        Uint i = Uint(rand())%numTexts;
         remove(texts[i]);
         texts[i] = texts[--numTexts];
       }
@@ -1548,7 +1550,7 @@ int main(int, const char*[]) {
 
     // begin draw
     {
-      glClearColor(0.1,0.1,0.1,1);
+      glClearColor(0.1f,0.1f,0.1f,1);
       glClear(GL_COLOR_BUFFER_BIT);
     }
 
@@ -1573,13 +1575,16 @@ int main(int, const char*[]) {
 
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, fontTexture);
+      glOKORDIE;
 
       glBindVertexArray(textVAO);
       glBindBuffer(GL_ARRAY_BUFFER, textVBO);
       if (textDirty) {
         glBufferSubData(GL_ARRAY_BUFFER, 0, (textSpritesMax - textSprites)*sizeof(textSprites[0]), textSprites);
       }
-      glUniform2f(viewLocation, 0, 0);
+      glOKORDIE;
+      glUniform2f(textViewLocation, 0.f, 0.f);
+      glOKORDIE;
       glDrawArrays(GL_POINTS, 0, (textSpritesMax - textSprites));
       glOKORDIE;
 

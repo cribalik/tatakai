@@ -30,3 +30,7 @@
 # Text editor stuff
 tags
 *.sublime-workspace
+
+# includes
+include/*
+!include/stb
